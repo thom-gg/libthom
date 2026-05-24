@@ -1,6 +1,6 @@
 #include "routines.h"
 #include "reduction.h"
-
+#include <cstddef>
 
 
 #define LOWER_BOUND -15.0
@@ -9,28 +9,27 @@
 static float * cpuX;
 static float * gpuX;
 static float * gpuOutput;
+static cudaError_t err;
 
 using ReductionImpl = float (*)(const float*, float*, int);
 
+
+/* Registering implementations, only if they're compiled. They are compiled if we are using the correct Compute Capability*/
 static const std::unordered_map<std::string, ReductionImpl> reductionImpls = {
 #if LIB_HAS(REDUCTION_WARP)
     {"warp", reduction_warp},
 #endif
 };
 
-double getRdmFloat() {
-    return LOWER_BOUND + ((float)rand() / RAND_MAX) * (UPPER_BOUND-LOWER_BOUND);
-}
 
 void allocate(int N) {
     cpuX = (float*)malloc(N*sizeof(float));
     if (cpuX == NULL) {fprintf(stderr, "Error allocating cpuX\n");}
 
-    cudaError_t err;
     err = cudaMalloc((void **)&gpuX, N*sizeof(float));
-    if (err != cudaSuccess) {fprintf(stderr, "Error allocating gpuX %s\n", cudaGetErrorString(err));}
+    CUDA_CHECK(err);
     err = cudaMalloc((void **)&gpuOutput, 1*sizeof(float));
-    if (err != cudaSuccess) {fprintf(stderr, "Error allocating gpuOutput %s\n", cudaGetErrorString(err));}
+    CUDA_CHECK(err);
 }
 
 void freeAll() {
@@ -40,12 +39,12 @@ void freeAll() {
 }
 
 void resetVectors(int N) {
-    for (int i = 0; i<N; i++) {cpuX[i] = getRdmFloat();}  
+    for (int i = 0; i<N; i++) {cpuX[i] = getRdmDouble(LOWER_BOUND, UPPER_BOUND);}  
 
-    cudaError_t err = cudaMemcpy(gpuX, cpuX, N*sizeof(float), cudaMemcpyHostToDevice);
-    if (err != cudaSuccess) {fprintf(stderr, "Error copying to gpuX %s\n", cudaGetErrorString(err));}
+    err = cudaMemcpy(gpuX, cpuX, N*sizeof(float), cudaMemcpyHostToDevice);
+    CUDA_CHECK(err);
     err = cudaMemset(gpuOutput, 0.0f, 1 * sizeof(float));
-    if (err != cudaSuccess) {fprintf(stderr, "Error memsetting to gpuOutput: %s\n", cudaGetErrorString(err));}
+    CUDA_CHECK(err);
 }
 
 float getReferenceResults(int N) {
@@ -59,7 +58,8 @@ float getReferenceResults(int N) {
 void compareToReference(int N) {
     // Copy GPU output to cpu
     float resultFromGpu;
-    cudaMemcpy(&resultFromGpu, gpuOutput, 1*sizeof(float), cudaMemcpyDeviceToHost);
+    err = cudaMemcpy(&resultFromGpu, gpuOutput, 1*sizeof(float), cudaMemcpyDeviceToHost);
+    CUDA_CHECK(err);
     float referenceResult = getReferenceResults(N);
 
     float relativeError = (abs(resultFromGpu - referenceResult) / abs(referenceResult));
@@ -105,6 +105,7 @@ void reduction_handler_test(int argc, char * argv[]) {
             }
 
             printf("[%d]: %f GFLOP/s \n", i, gflops);
+            sum_gflops += gflops;
 
             resetVectors(size);
             cudaDeviceSynchronize();
@@ -121,8 +122,21 @@ void reduction_handler_test(int argc, char * argv[]) {
     }
 }
 
-void reduction_handler_bench(int argc, char* argv[]) {
+/* BENCHMARKING */
+static ReductionImpl selectedReductionImpl = nullptr;
 
+
+void reduction_handler_bench(int argc, char* argv[]) {
+    /* Handler called first that only sets the parameters up for benchmarking.
+    The actual benchmark is invoked by starting nvbench in main.cpp*/
+    char * implName = argv[3];
+    try {
+        selectedReductionImpl = reductionImpls.at(implName);
+    }
+    catch (const std::out_of_range&) {
+        fprintf(stderr, "Invalid implementation. Either it doesnt exist, or it's not available for the ARCH you've compiled\n");
+        exit(1);
+    }
 }
 
 void reduction_handler(RunMode runMode, int argc, char * argv[]) {
@@ -134,22 +148,5 @@ void reduction_handler(RunMode runMode, int argc, char * argv[]) {
             reduction_handler_bench(argc, argv);
             break;
     }
-
-    char * impl = argv[3];
-    auto implIt = reductionImpls.find(impl);
-    if (implIt == reductionImpls.end()) {
-        fprintf(stderr, "Unknown or unavailable reduction implementation: %s\n", impl);
-        exit(1);
-    }
-
-    int N = 10000;
-    allocate(N);
-    resetVectors(N);
-
-    float time = implIt->second(gpuX, gpuOutput, N);
-    printf("time = %f\n", time);
-
-    printf("Hello from reduction handler, run mode = %d\n", runMode);
-
 
 }

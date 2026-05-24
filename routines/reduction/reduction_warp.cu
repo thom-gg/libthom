@@ -88,7 +88,8 @@ __global__ void gmem_red_single_block(float * resultsBlocks, float * output, int
 
 // Note: input, output, shape are device pointers
 float reduction_warp(const float* input,  float* output, int N) {
- cudaEvent_t start, stop;
+    cudaEvent_t start, stop;
+    cudaError_t error;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
@@ -100,7 +101,8 @@ float reduction_warp(const float* input,  float* output, int N) {
     float * resultsBlocks;
     cudaMalloc((void**)&resultsBlocks, nbBlocks * sizeof(float));
     first_kernel<<<nbBlocks, threadsPerBlock, shmemSize>>>(input, N, warpsPerBlock, resultsBlocks);
-
+    error = cudaGetLastError();
+    CUDA_CHECK(error);
     int threadsKernel2 = nbBlocks;
     size_t shmemKernel2 = (nbBlocks / 32) * sizeof(float);
     gmem_red_single_block<<<1,threadsKernel2,shmemKernel2>>>(resultsBlocks, output, nbBlocks);
