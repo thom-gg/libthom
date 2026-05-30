@@ -1,6 +1,7 @@
 set(SELECTED_REDUCTION_CUDA_FILES)
 
 add_arch_cuda_source(libroutines SELECTED_REDUCTION_CUDA_FILES reduction_warp all)
+add_arch_cuda_source(libroutines SELECTED_REDUCTION_CUDA_FILES reduction_thrust all)
 
 if(NOT SELECTED_REDUCTION_CUDA_FILES)
     message(WARNING "No reduction CUDA implementation found for ARCH=${ARCH}")

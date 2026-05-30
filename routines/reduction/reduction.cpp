@@ -9,11 +9,11 @@
 
 #define BENCH_RUNS 10
 #define WARMUP_RUNS 5
-const int SIZES[] = {10000, 100'000, 1'000'000, 10'000'000, 100'000'000, 200'000'000};
+const int SIZES[] = {10000, 100'000, 1'000'000, 10'000'000, 100'000'000, 200'000'000, 300'000'000, 500'000'000};
 
 
-#define LOWER_BOUND -15.0
-#define UPPER_BOUND 15.0
+#define LOWER_BOUND -3.0
+#define UPPER_BOUND 3.0
 
 static float * cpuX;
 static float * gpuX;
@@ -27,6 +27,9 @@ using ReductionImpl = float (*)(const float*, float*, int);
 static const std::unordered_map<std::string, ReductionImpl> reductionImpls = {
 #if LIB_HAS(REDUCTION_WARP)
     {"warp", reduction_warp},
+#endif
+#if LIB_HAS(REDUCTION_THRUST)
+    {"thrust", reduction_thrust},
 #endif
 };
 
@@ -52,7 +55,10 @@ curandGenerator_t gen;
 void resetVectors(int N) {
     CURAND_CHECK(curandGenerateUniform(gen, gpuX, N));
     err = cudaMemset(gpuOutput, 0, sizeof(float));
-    CUDA_CHECK(err);   cudaDeviceSynchronize();
+    CUDA_CHECK(err);   
+    cudaDeviceSynchronize();
+    err = cudaMemcpy(cpuX, gpuX, N * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
 }
 
 float getReferenceResults(int N) {
