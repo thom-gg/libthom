@@ -9,6 +9,11 @@ add_library(libroutines STATIC
     scan/scan.cpp
 )
 
+target_compile_options(libroutines PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+    $<$<COMPILE_LANGUAGE:CUDA>:-O3>
+)
+
 # Setting arch property for NVCC
 if(NOT ARCH STREQUAL "all")
     set_property(TARGET libroutines PROPERTY CUDA_ARCHITECTURES ${ARCH})

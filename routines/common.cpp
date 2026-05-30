@@ -1,6 +1,6 @@
 #include "routines.h"
 
 
-double getRdmDouble(double lowerBound, double upperBound) {
+float getRdmFloat(float lowerBound, float upperBound) {
     return lowerBound + ((float)rand() / RAND_MAX) * (upperBound-lowerBound);
 }

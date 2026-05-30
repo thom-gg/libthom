@@ -1,6 +1,15 @@
 #include "routines.h"
 #include "reduction.h"
 #include <cstddef>
+#include <fstream>
+#include <map>
+#include <nvtx3/nvToolsExt.h>
+#include <curand.h>
+#include <curand_kernel.h>
+
+#define BENCH_RUNS 10
+#define WARMUP_RUNS 5
+const int SIZES[] = {10000, 100'000, 1'000'000, 10'000'000, 100'000'000, 200'000'000};
 
 
 #define LOWER_BOUND -15.0
@@ -38,13 +47,12 @@ void freeAll() {
     cudaFree(gpuOutput);
 }
 
-void resetVectors(int N) {
-    for (int i = 0; i<N; i++) {cpuX[i] = getRdmDouble(LOWER_BOUND, UPPER_BOUND);}  
+curandGenerator_t gen;
 
-    err = cudaMemcpy(gpuX, cpuX, N*sizeof(float), cudaMemcpyHostToDevice);
-    CUDA_CHECK(err);
-    err = cudaMemset(gpuOutput, 0.0f, 1 * sizeof(float));
-    CUDA_CHECK(err);
+void resetVectors(int N) {
+    CURAND_CHECK(curandGenerateUniform(gen, gpuX, N));
+    err = cudaMemset(gpuOutput, 0, sizeof(float));
+    CUDA_CHECK(err);   cudaDeviceSynchronize();
 }
 
 float getReferenceResults(int N) {
@@ -74,6 +82,41 @@ float getGflops(int N, float time_ms) {
     return gflops;
 }
 
+/* Runner that can be called either by  the test handler or benchmark handler, and will return the average gflops */
+float runner(ReductionImpl impl, int size, int nb_runs, int nb_warmup_runs, bool checkResult, bool printEach) {
+    float sum_gflops = 0.0f;
+    allocate(size);
+    resetVectors(size);
+
+    for (int i = -1*nb_warmup_runs; i<nb_runs; i++) {
+        float time_ms = impl(gpuX, gpuOutput, size);
+
+        
+        if (checkResult) {
+            compareToReference(size);
+        }
+        
+        if (i >= 0) {
+
+            float gflops = getGflops(size, time_ms);
+
+            if (printEach) {
+                printf("[internal][iter %d]: %f GFLOP/s \n", i, gflops);
+            }
+            sum_gflops += gflops;
+        }
+
+
+        resetVectors(size);
+        cudaDeviceSynchronize();
+    }
+
+    float avg_gflops = sum_gflops / nb_runs;
+
+    freeAll();
+
+    return avg_gflops;
+}
 
 void reduction_handler_test(int argc, char * argv[]) {
     /*
@@ -92,28 +135,8 @@ void reduction_handler_test(int argc, char * argv[]) {
         if (argc == 7) {checkResult = atoi(argv[6]) == 1;}
 
         
-        float sum_gflops = 0.0f;
-
-        allocate(size);
-        resetVectors(size);
-        for (int i = 0; i<nb_iter; i++) {
-            float time_ms = impl(gpuX, gpuOutput, size);
-            float gflops = getGflops(size, time_ms);
-
-            if (checkResult) {
-                compareToReference(size);
-            }
-
-            printf("[%d]: %f GFLOP/s \n", i, gflops);
-            sum_gflops += gflops;
-
-            resetVectors(size);
-            cudaDeviceSynchronize();
-        }
-
-        float avg_gflops = sum_gflops / nb_iter;
-        printf("# GFLOP/s: %f\n", avg_gflops);
-        freeAll();
+        float gflops = runner(impl, size, nb_iter, 0, checkResult, true);
+        printf("# GFLOP/s: %f\n", gflops);
 
     }
     catch (const std::out_of_range&) {
@@ -123,15 +146,40 @@ void reduction_handler_test(int argc, char * argv[]) {
 }
 
 /* BENCHMARKING */
-static ReductionImpl selectedReductionImpl = nullptr;
 
+void exportCSV(const std::map<int, float>& results,
+               const std::string& filename)
+{
+    std::ofstream file(filename);
+
+    file << "size,gflops\n";
+
+    for (const auto& [size, gflops] : results) {
+        file << size << "," << gflops << "\n";
+    }
+}
 
 void reduction_handler_bench(int argc, char* argv[]) {
-    /* Handler called first that only sets the parameters up for benchmarking.
-    The actual benchmark is invoked by starting nvbench in main.cpp*/
+    /*
+        ./libthom bench reduction impl
+    */
+    if (argc != 4) {
+        fprintf(stderr, "Missing arguments.\nUsage: ./libthom bench reduction <impl>\n");
+        exit(1);
+    }
     char * implName = argv[3];
+    std::map<int, float> results;
+
     try {
-        selectedReductionImpl = reductionImpls.at(implName);
+        ReductionImpl impl = reductionImpls.at(implName);
+        for (int size : SIZES) {
+            printf("\nStarting benchmark for size %d...\n", size);
+            float gflops = runner(impl, size, BENCH_RUNS, WARMUP_RUNS, false, true);
+            results[size] = gflops;
+            printf("[size: %d] ==> %f\n", size, gflops);
+        }
+        std::string filename = std::string("bench_") + implName + ".csv";
+        exportCSV(results, filename);
     }
     catch (const std::out_of_range&) {
         fprintf(stderr, "Invalid implementation. Either it doesnt exist, or it's not available for the ARCH you've compiled\n");
@@ -140,6 +188,10 @@ void reduction_handler_bench(int argc, char* argv[]) {
 }
 
 void reduction_handler(RunMode runMode, int argc, char * argv[]) {
+    curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT);
+    curandSetPseudoRandomGeneratorSeed(gen, 1234ULL);
+
+
     switch (runMode) {
         case RunMode::TEST:
             reduction_handler_test(argc, argv);
@@ -148,5 +200,7 @@ void reduction_handler(RunMode runMode, int argc, char * argv[]) {
             reduction_handler_bench(argc, argv);
             break;
     }
+
+    curandDestroyGenerator(gen);
 
 }

@@ -22,9 +22,18 @@
         }                                                                           \
     } while (0)
 
+#define CURAND_CHECK(call) do {                                 \
+    curandStatus_t status = (call);                             \
+    if (status != CURAND_STATUS_SUCCESS) {                      \
+        fprintf(stderr, "cuRAND error: %d at %s:%d\n",         \
+                (int)status, __FILE__, __LINE__);              \
+        exit(EXIT_FAILURE);                                     \
+    }                                                           \
+} while(0)
+
 void reduction_handler(RunMode runMode, int argc, char * argv[]);
 void scan_handler(RunMode runMode, int argc, char * argv[]);
 
 
 /* Common helpers */
-double getRdmDouble(double lowerBound, double upperBound);
+float getRdmFloat(float lowerBound, float upperBound);
