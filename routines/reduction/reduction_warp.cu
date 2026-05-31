@@ -86,7 +86,6 @@ __global__ void gmem_red_single_block(float * resultsBlocks, float * output, int
     }
 }
 
-// Note: input, output, shape are device pointers
 float reduction_warp(const float* input,  float* output, int N) {
     cudaEvent_t start, stop;
     cudaError_t error;
