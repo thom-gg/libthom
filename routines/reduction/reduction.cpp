@@ -2,14 +2,13 @@
 #include "reduction.h"
 #include <cstddef>
 #include <fstream>
-#include <map>
 #include <nvtx3/nvToolsExt.h>
 #include <curand.h>
 #include <curand_kernel.h>
 
 #define BENCH_RUNS 10
 #define WARMUP_RUNS 5
-const int SIZES[] = {10000, 100'000, 1'000'000, 10'000'000, 100'000'000, 200'000'000, 300'000'000, 500'000'000};
+const std::vector<int> SIZES = {10000, 100'000, 1'000'000, 10'000'000, 100'000'000, 200'000'000, 300'000'000, 500'000'000};
 
 
 #define LOWER_BOUND -3.0
@@ -124,32 +123,6 @@ float runner(ReductionImpl impl, int size, int nb_runs, int nb_warmup_runs, bool
     return avg_gflops;
 }
 
-void reduction_handler_test(int argc, char * argv[]) {
-    /*
-        ./libthom test reduction <impl> <size> <nb_iter> <check_result=1>
-    */
-    if (argc != 6 && argc != 7) {
-        fprintf(stderr, "Missing arguments.\nUsage: ./libthom test reduction <impl> <size> <nb_iter> <check_result=1>\n");
-        exit(1);
-    }
-    char * implName = argv[3];
-    try {
-        ReductionImpl impl = reductionImpls.at(implName);
-        int size = atoi(argv[4]);
-        int nb_iter = atoi(argv[5]);
-        bool checkResult = true;
-        if (argc == 7) {checkResult = atoi(argv[6]) == 1;}
-
-        
-        float gflops = runner(impl, size, nb_iter, 0, checkResult, true);
-        printf("# GFLOP/s: %f\n", gflops);
-
-    }
-    catch (const std::out_of_range&) {
-        fprintf(stderr, "Invalid implementation. Either it doesnt exist, or it's not available for the ARCH you've compiled\n");
-        exit(1);
-    }
-}
 
 /* BENCHMARKING */
 
@@ -165,34 +138,6 @@ void exportCSV(const std::map<int, float>& results,
     }
 }
 
-void reduction_handler_bench(int argc, char* argv[]) {
-    /*
-        ./libthom bench reduction impl
-    */
-    if (argc != 4) {
-        fprintf(stderr, "Missing arguments.\nUsage: ./libthom bench reduction <impl>\n");
-        exit(1);
-    }
-    char * implName = argv[3];
-    std::map<int, float> results;
-
-    try {
-        ReductionImpl impl = reductionImpls.at(implName);
-        for (int size : SIZES) {
-            printf("\nStarting benchmark for size %d...\n", size);
-            float gflops = runner(impl, size, BENCH_RUNS, WARMUP_RUNS, false, true);
-            results[size] = gflops;
-            printf("[size: %d] ==> %f\n", size, gflops);
-        }
-        std::string filename = std::string("bench_") + implName + ".csv";
-        exportCSV(results, filename);
-    }
-    catch (const std::out_of_range&) {
-        fprintf(stderr, "Invalid implementation. Either it doesnt exist, or it's not available for the ARCH you've compiled\n");
-        exit(1);
-    }
-}
-
 void reduction_handler(RunMode runMode, int argc, char * argv[]) {
     curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT);
     curandSetPseudoRandomGeneratorSeed(gen, 1234ULL);
@@ -200,10 +145,10 @@ void reduction_handler(RunMode runMode, int argc, char * argv[]) {
 
     switch (runMode) {
         case RunMode::TEST:
-            reduction_handler_test(argc, argv);
+            Handlers<ReductionImpl,BENCH_RUNS, WARMUP_RUNS>::test_handler(argc, argv, reductionImpls, runner);
             break;
         case RunMode::BENCH:
-            reduction_handler_bench(argc, argv);
+            Handlers<ReductionImpl,BENCH_RUNS,WARMUP_RUNS>::bench_handler(argc, argv, reductionImpls, runner, SIZES, exportCSV);
             break;
     }
 

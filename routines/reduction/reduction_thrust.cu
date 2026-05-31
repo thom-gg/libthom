@@ -5,7 +5,6 @@
 
 float reduction_thrust(const float* input,  float* output, int N) {
     cudaEvent_t start, stop;
-    cudaError_t error;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
