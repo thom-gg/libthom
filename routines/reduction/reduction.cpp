@@ -6,7 +6,7 @@
 
 #define BENCH_RUNS 10
 #define WARMUP_RUNS 5
-const std::vector<int> SIZES = {10000, 100'000, 1'000'000, 10'000'000, 100'000'000, 200'000'000, 300'000'000, 500'000'000};
+const std::vector<std::vector<int>> SIZES = {{10000}, {100'000}, {1'000'000}, {10'000'000}, {100'000'000}, {200'000'000}, {300'000'000}, {500'000'000}};
 
 
 #define LOWER_BOUND -3.0
@@ -86,22 +86,22 @@ float getGflops(int N, float time_ms) {
 }
 
 /* Runner that can be called either by  the test handler or benchmark handler, and will return the average gflops */
-float runner(ReductionImpl impl, int size, int nb_runs, int nb_warmup_runs, bool checkResult, bool printEach) {
+float runner(ReductionImpl impl, std::vector<int> sizes, int nb_runs, int nb_warmup_runs, bool checkResult, bool printEach, int argc, char * argv[]) {
     float sum_gflops = 0.0f;
-    allocate(size);
-    resetVectors(size);
+    allocate(sizes[0]);
+    resetVectors(sizes[0]);
 
     for (int i = -1*nb_warmup_runs; i<nb_runs; i++) {
-        float time_ms = impl(gpuX, gpuOutput, size);
+        float time_ms = impl(gpuX, gpuOutput, sizes[0]);
 
         
         if (checkResult) {
-            compareToReference(size);
+            compareToReference(sizes[0]);
         }
         
         if (i >= 0) {
 
-            float gflops = getGflops(size, time_ms);
+            float gflops = getGflops(sizes[0], time_ms);
 
             if (printEach) {
                 printf("[internal][iter %d]: %f GFLOP/s \n", i, gflops);
@@ -110,7 +110,7 @@ float runner(ReductionImpl impl, int size, int nb_runs, int nb_warmup_runs, bool
         }
 
 
-        resetVectors(size);
+        resetVectors(sizes[0]);
         cudaDeviceSynchronize();
     }
 
@@ -124,15 +124,15 @@ float runner(ReductionImpl impl, int size, int nb_runs, int nb_warmup_runs, bool
 
 /* BENCHMARKING */
 
-void exportCSV(const std::map<int, float>& results,
+void exportCSV(const std::map<std::vector<int>, float>& results,
                const std::string& filename)
 {
     std::ofstream file(filename);
 
     file << "size,gflops\n";
 
-    for (const auto& [size, gflops] : results) {
-        file << size << "," << gflops << "\n";
+    for (const auto& [sizes, gflops] : results) {
+        file << sizes[0] << "," << gflops << "\n";
     }
 }
 
@@ -143,10 +143,10 @@ void reduction_handler(RunMode runMode, int argc, char * argv[]) {
 
     switch (runMode) {
         case RunMode::TEST:
-            Handlers<ReductionImpl,BENCH_RUNS, WARMUP_RUNS>::test_handler(argc, argv, reductionImpls, runner);
+            Handlers<ReductionImpl, 1, BENCH_RUNS, WARMUP_RUNS>::test_handler(argc, argv, reductionImpls, runner);
             break;
         case RunMode::BENCH:
-            Handlers<ReductionImpl,BENCH_RUNS,WARMUP_RUNS>::bench_handler(argc, argv, reductionImpls, runner, SIZES, exportCSV);
+            Handlers<ReductionImpl, 1, BENCH_RUNS,WARMUP_RUNS>::bench_handler(argc, argv, reductionImpls, runner, SIZES, exportCSV);
             break;
     }
 

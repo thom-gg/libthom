@@ -16,7 +16,7 @@
 cublasHandle_t cublasHandle;
 
 namespace sdot {
-    static const std::vector<int> SIZES = {10000, 100'000, 1'000'000, 10'000'000, 100'000'000, 200'000'000, 300'000'000, 500'000'000};
+    static const std::vector<std::vector<int>> SIZES = {{10000}, {100'000}, {1'000'000}, {10'000'000}, {100'000'000}, {200'000'000}, {300'000'000}, {500'000'000}};
     
     static float * cpuX;
     static float * cpuY;
@@ -121,22 +121,22 @@ namespace sdot {
     }
     
     /* Runner that can be called either by  the test handler or benchmark handler, and will return the average gflops */
-    float runner(SdotImpl impl, int size, int nb_runs, int nb_warmup_runs, bool checkResult, bool printEach) {
+    float runner(SdotImpl impl, std::vector<int> size, int nb_runs, int nb_warmup_runs, bool checkResult, bool printEach, int argc, char* argv[]) {
         float sum_gflops = 0.0f;
-        allocate(size);
-        resetVectors(size);
+        allocate(size[0]);
+        resetVectors(size[0]);
     
         for (int i = -1*nb_warmup_runs; i<nb_runs; i++) {
-            float time_ms = impl(size, gpuX, gpuY, gpuOutput);
+            float time_ms = impl(size[0], gpuX, gpuY, gpuOutput);
     
             
             if (checkResult) {
-                compareToReference(size);
+                compareToReference(size[0]);
             }
             
             if (i >= 0) {
     
-                float gflops = getGflops(size, time_ms);
+                float gflops = getGflops(size[0], time_ms);
     
                 if (printEach) {
                     printf("[internal][iter %d]: %f GFLOP/s \n", i, gflops);
@@ -145,7 +145,7 @@ namespace sdot {
             }
     
     
-            resetVectors(size);
+            resetVectors(size[0]);
             cudaDeviceSynchronize();
         }
     
@@ -158,15 +158,15 @@ namespace sdot {
     
     /* BENCHMARKING */
     
-    void exportCSV(const std::map<int, float>& results,
+    void exportCSV(const std::map<std::vector<int>, float>& results,
                     const std::string& filename)
     {
         std::ofstream file(filename);
     
         file << "size,gflops\n";
     
-        for (const auto& [size, gflops] : results) {
-            file << size << "," << gflops << "\n";
+        for (const auto& [sizes, gflops] : results) {
+            file << sizes[0] << "," << gflops << "\n";
         }
     }
     
@@ -184,10 +184,10 @@ void sdot_handler(RunMode runMode, int argc, char * argv[]) {
 
     switch (runMode) {
         case RunMode::TEST:
-            Handlers<sdot::SdotImpl,BENCH_RUNS, WARMUP_RUNS>::test_handler(argc, argv, sdot::sdotImpls, sdot::runner);
+            Handlers<sdot::SdotImpl, 1, BENCH_RUNS, WARMUP_RUNS>::test_handler(argc, argv, sdot::sdotImpls, sdot::runner);
             break;
         case RunMode::BENCH:
-            Handlers<sdot::SdotImpl,BENCH_RUNS, WARMUP_RUNS>::bench_handler(argc, argv, sdot::sdotImpls, sdot::runner, sdot::SIZES, sdot::exportCSV);
+            Handlers<sdot::SdotImpl, 1, BENCH_RUNS, WARMUP_RUNS>::bench_handler(argc, argv, sdot::sdotImpls, sdot::runner, sdot::SIZES, sdot::exportCSV);
             break;
     }
 

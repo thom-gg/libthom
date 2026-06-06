@@ -18,7 +18,8 @@ using RoutineHandler = void (*)(RunMode, int, char **);
 
 static const std::unordered_map<std::string, RoutineHandler> routinesMap = {
     {"reduction", reduction_handler},
-    {"sdot", sdot_handler}
+    {"sdot", sdot_handler},
+    {"sgemv", sgemv_handler}
 };
 
 int main(int argc, char * argv[]) {
