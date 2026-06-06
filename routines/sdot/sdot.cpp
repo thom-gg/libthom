@@ -13,9 +13,9 @@
 #define UPPER_BOUND 5.0
 
 
-cublasHandle_t cublasHandle;
 
 namespace sdot {
+    cublasHandle_t cublasHandle;
     static const std::vector<std::vector<int>> SIZES = {{10000}, {100'000}, {1'000'000}, {10'000'000}, {100'000'000}, {200'000'000}, {300'000'000}, {500'000'000}};
     
     static float * cpuX;
@@ -180,7 +180,7 @@ namespace sdot {
 void sdot_handler(RunMode runMode, int argc, char * argv[]) {
     curandCreateGenerator(&sdot::gen, CURAND_RNG_PSEUDO_DEFAULT);
     curandSetPseudoRandomGeneratorSeed(sdot::gen, 1234ULL);
-    CUBLAS_CHECK(cublasCreate(&cublasHandle));
+    CUBLAS_CHECK(cublasCreate(&sdot::cublasHandle));
 
     switch (runMode) {
         case RunMode::TEST:
@@ -191,7 +191,7 @@ void sdot_handler(RunMode runMode, int argc, char * argv[]) {
             break;
     }
 
-    CUBLAS_CHECK(cublasDestroy(cublasHandle));
+    CUBLAS_CHECK(cublasDestroy(sdot::cublasHandle));
     curandDestroyGenerator(sdot::gen);
 
 }

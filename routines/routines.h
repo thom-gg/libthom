@@ -17,7 +17,13 @@
 
 #define LIB_HAS(name) LIB_HAS_##name
 
-extern cublasHandle_t cublasHandle;
+namespace sgemv {
+    extern cublasHandle_t cublasHandle;
+}
+
+namespace sdot {
+    extern cublasHandle_t cublasHandle;
+}
 
 
 

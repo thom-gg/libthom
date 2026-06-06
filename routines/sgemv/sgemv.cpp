@@ -43,6 +43,27 @@ namespace sgemv {
     #if LIB_HAS(SGEMV_NAIVE)
         {"sgemv_naive", sgemv_naive},
     #endif
+    #if LIB_HAS(SGEMV_BLOCK_ROW)
+        {"sgemv_block_row", sgemv_block_row},
+    #endif
+    #if LIB_HAS(SGEMV_COL1_NAIVE)
+        {"sgemv_col1_naive", sgemv_col1_naive},
+    #endif
+    #if LIB_HAS(SGEMV_COL2_SHMEM)
+        {"sgemv_col2_shmem", sgemv_col2_shmem},
+    #endif
+    #if LIB_HAS(SGEMV_COL3_VECTO)
+        {"sgemv_col3_vecto", sgemv_col3_vecto},
+    #endif
+    #if LIB_HAS(SGEMV_COL4_TRANS)
+        {"sgemv_col4_trans", sgemv_col4_trans},
+    #endif
+    #if LIB_HAS(SGEMV_CUBLAS)
+        {"sgemv_cublas", sgemv_cublas},
+    #endif
+    #if LIB_HAS(SGEMV_VECTO)
+        {"sgemv_vecto", sgemv_vecto},
+    #endif
     };
  
 
@@ -136,7 +157,7 @@ namespace sgemv {
             float rel_error = fabsf(resultFromGpu[i] -  cpuY[i]) / fabsf( cpuY[i]);
             if (rel_error > 1e-3f) {
                 countDifferent++;
-                printf("Different results at index %d: relative error: %f\n", i, rel_error);
+                // printf("Different results at index %d: relative error: %f\n", i, rel_error);
             }
         }
         if (countDifferent > 0) {
@@ -216,6 +237,7 @@ namespace sgemv {
 void sgemv_handler(RunMode runMode, int argc, char * argv[]) {
     CURAND_CHECK(curandCreateGenerator(&sgemv::gen, CURAND_RNG_PSEUDO_DEFAULT));
     CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(sgemv::gen, 1234ULL));
+    CUBLAS_CHECK(cublasCreate(&sgemv::cublasHandle));
 
     switch (runMode) {
         case RunMode::TEST:
@@ -227,5 +249,6 @@ void sgemv_handler(RunMode runMode, int argc, char * argv[]) {
     }
 
     CURAND_CHECK(curandDestroyGenerator(sgemv::gen));
+    CUBLAS_CHECK(cublasDestroy(sgemv::cublasHandle));
 
 }

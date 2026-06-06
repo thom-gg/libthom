@@ -8,7 +8,7 @@ float sdot_cublas(int n, const float * x, const float * y, float * result) {
     cudaEventCreate(&stop);
 
     cudaEventRecord(start);
-    CUBLAS_CHECK(cublasSdot(cublasHandle, n, x, 1, y, 1, result));
+    CUBLAS_CHECK(cublasSdot(sdot::cublasHandle, n, x, 1, y, 1, result));
     cudaEventRecord(stop);
     CUDA_CHECK(cudaGetLastError());
     cudaEventSynchronize(stop);
