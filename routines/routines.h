@@ -10,9 +10,15 @@
 #include <map>
 #include <vector>
 #include <stdexcept>
+#include <curand.h>
+#include <curand_kernel.h>
+#include "cublas_v2.h"
 #include "enums.h"
 
 #define LIB_HAS(name) LIB_HAS_##name
+
+extern cublasHandle_t cublasHandle;
+
 
 
 #define CUDA_CHECK(error)                                                     \
@@ -34,7 +40,7 @@
 } while(0)
 
 void reduction_handler(RunMode runMode, int argc, char * argv[]);
-void scan_handler(RunMode runMode, int argc, char * argv[]);
+void sdot_handler(RunMode runMode, int argc, char * argv[]);
 
 
 /* Common helpers */

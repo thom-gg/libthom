@@ -3,8 +3,6 @@
 #include <cstddef>
 #include <fstream>
 #include <nvtx3/nvToolsExt.h>
-#include <curand.h>
-#include <curand_kernel.h>
 
 #define BENCH_RUNS 10
 #define WARMUP_RUNS 5

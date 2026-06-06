@@ -6,7 +6,7 @@ add_library(libroutines STATIC
     routines.h
     common.cpp
     reduction/reduction.cpp
-    scan/scan.cpp
+    sdot/sdot.cpp
 )
 
 target_compile_options(libroutines PRIVATE
@@ -27,3 +27,4 @@ target_include_directories(libroutines
 
 # All routine subdirectories will include their own implementations using their own CMakeLists.txts
 add_subdirectory(reduction)
+add_subdirectory(sdot)

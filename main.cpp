@@ -18,7 +18,7 @@ using RoutineHandler = void (*)(RunMode, int, char **);
 
 static const std::unordered_map<std::string, RoutineHandler> routinesMap = {
     {"reduction", reduction_handler},
-    {"scan", scan_handler}
+    {"sdot", sdot_handler}
 };
 
 int main(int argc, char * argv[]) {
@@ -42,7 +42,7 @@ int main(int argc, char * argv[]) {
         handler(runMode, argc, argv);
     }
     catch (const std::out_of_range&) {
-        fprintf(stderr, "Invalid mode or routine: %s %s\n", mode, routine);
+        fprintf(stderr, "Invalid mode or routine: %s %s\nThey must be registered in main.cpp\n", mode, routine);
         return EXIT_FAILURE;
     }
  
