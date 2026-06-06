@@ -39,6 +39,15 @@ extern cublasHandle_t cublasHandle;
     }                                                           \
 } while(0)
 
+#define CUBLAS_CHECK(call) do {                                 \
+    cublasStatus_t status = (call);                             \
+    if (status != CUBLAS_STATUS_SUCCESS) {                      \
+        fprintf(stderr, "cuBLAS error: %d at %s:%d\n",         \
+                (int)status, __FILE__, __LINE__);              \
+        exit(EXIT_FAILURE);                                     \
+    }                                                           \
+} while(0)
+
 void reduction_handler(RunMode runMode, int argc, char * argv[]);
 void sdot_handler(RunMode runMode, int argc, char * argv[]);
 
@@ -58,6 +67,11 @@ struct Handlers {
         */
         if (argc != 6 && argc != 7) {
             fprintf(stderr, "Missing arguments.\nUsage: ./libthom test <routine> <impl> <size> <nb_iter> <check_result=1>\n");
+            fprintf(stderr, "Available implementations:");
+            for (const auto& entry : implementationsMap) {
+                fprintf(stderr, " %s", entry.first.c_str());
+            }
+            fprintf(stderr, "\n");
             exit(1);
         }
         char * implName = argv[3];
@@ -85,6 +99,11 @@ struct Handlers {
         */
         if (argc != 4) {
             fprintf(stderr, "Missing arguments.\nUsage: ./libthom bench <routine> <impl>\n");
+            fprintf(stderr, "Available implementations:");
+            for (const auto& entry : implementationsMap) {
+                fprintf(stderr, " %s", entry.first.c_str());
+            }
+            fprintf(stderr, "\n");
             exit(1);
         }
         char * implName = argv[3];
@@ -103,6 +122,11 @@ struct Handlers {
         }
         catch (const std::out_of_range&) {
             fprintf(stderr, "Invalid implementation. Either it doesnt exist, or it's not available for the ARCH you've compiled\n");
+            fprintf(stderr, "Available implementations:");
+            for (const auto& entry : implementationsMap) {
+                fprintf(stderr, " %s", entry.first.c_str());
+            }
+            fprintf(stderr, "\n");
             exit(1);
         }
     }

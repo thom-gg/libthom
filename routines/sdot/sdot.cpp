@@ -180,6 +180,7 @@ namespace sdot {
 void sdot_handler(RunMode runMode, int argc, char * argv[]) {
     curandCreateGenerator(&sdot::gen, CURAND_RNG_PSEUDO_DEFAULT);
     curandSetPseudoRandomGeneratorSeed(sdot::gen, 1234ULL);
+    CUBLAS_CHECK(cublasCreate(&cublasHandle));
 
     switch (runMode) {
         case RunMode::TEST:
@@ -190,6 +191,7 @@ void sdot_handler(RunMode runMode, int argc, char * argv[]) {
             break;
     }
 
+    CUBLAS_CHECK(cublasDestroy(cublasHandle));
     curandDestroyGenerator(sdot::gen);
 
 }
