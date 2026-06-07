@@ -25,6 +25,10 @@ namespace sdot {
     extern cublasHandle_t cublasHandle;
 }
 
+namespace dgemm {
+    extern cublasHandle_t cublasHandle;
+}
+
 
 
 #define CUDA_CHECK(error)                                                     \
@@ -57,7 +61,7 @@ namespace sdot {
 void reduction_handler(RunMode runMode, int argc, char * argv[]);
 void sdot_handler(RunMode runMode, int argc, char * argv[]);
 void sgemv_handler(RunMode runMode, int argc, char * argv[]);
-
+void dgemm_handler(RunMode runMode, int argc, char * argv[]);
 
 /* Common helpers */
 float getRdmFloat(float lowerBound, float upperBound);
@@ -102,6 +106,11 @@ struct Handlers {
         }
         catch (const std::out_of_range&) {
             fprintf(stderr, "Invalid implementation. Either it doesnt exist, or it's not available for the ARCH you've compiled\n");
+            fprintf(stderr, "Available implementations:");
+            for (const auto& entry : implementationsMap) {
+                fprintf(stderr, " %s", entry.first.c_str());
+            }
+            fprintf(stderr, "\n");
             exit(1);
         }
     }

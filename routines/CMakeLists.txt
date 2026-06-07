@@ -8,6 +8,7 @@ add_library(libroutines STATIC
     reduction/reduction.cpp
     sdot/sdot.cpp
     sgemv/sgemv.cpp
+    dgemm/dgemm.cpp
 )
 
 target_compile_options(libroutines PRIVATE
@@ -30,3 +31,4 @@ target_include_directories(libroutines
 add_subdirectory(reduction)
 add_subdirectory(sdot)
 add_subdirectory(sgemv)
+add_subdirectory(dgemm)
