@@ -29,6 +29,10 @@ namespace dgemm {
     extern cublasHandle_t cublasHandle;
 }
 
+namespace hgemm {
+    extern cublasHandle_t cublasHandle;
+}
+
 
 
 #define CUDA_CHECK(error)                                                     \
@@ -62,6 +66,7 @@ void reduction_handler(RunMode runMode, int argc, char * argv[]);
 void sdot_handler(RunMode runMode, int argc, char * argv[]);
 void sgemv_handler(RunMode runMode, int argc, char * argv[]);
 void dgemm_handler(RunMode runMode, int argc, char * argv[]);
+void hgemm_handler(RunMode runMode, int argc, char * argv[]);
 
 /* Common helpers */
 float getRdmFloat(float lowerBound, float upperBound);

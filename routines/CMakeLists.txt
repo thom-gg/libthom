@@ -9,11 +9,13 @@ add_library(libroutines STATIC
     sdot/sdot.cpp
     sgemv/sgemv.cpp
     dgemm/dgemm.cpp
+    hgemm/hgemm.cu
 )
 
 target_compile_options(libroutines PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
     $<$<COMPILE_LANGUAGE:CUDA>:-O3>
+    $<$<COMPILE_LANGUAGE:CUDA>:-extended-lambda>
 )
 
 # Setting arch property for NVCC
@@ -32,3 +34,4 @@ add_subdirectory(reduction)
 add_subdirectory(sdot)
 add_subdirectory(sgemv)
 add_subdirectory(dgemm)
+add_subdirectory(hgemm)
