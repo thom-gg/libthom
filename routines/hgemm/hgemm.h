@@ -7,3 +7,7 @@
 float hgemm_cublas(const __half* A, const __half* B, __half* C, size_t M, size_t N, size_t K,__half alpha, __half beta);
 #endif
 
+
+#if LIB_HAS(HGEMM_FINAL)
+float hgemm_final(const __half* A, const __half* B, __half* C, size_t M, size_t N, size_t K,__half alpha, __half beta);
+#endif

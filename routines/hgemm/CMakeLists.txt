@@ -1,7 +1,7 @@
 set(SELECTED_HGEMM_CUDA_FILES)
 
 add_arch_cuda_source(libroutines SELECTED_HGEMM_CUDA_FILES hgemm_cublas all)
-
+add_arch_cuda_source(libroutines SELECTED_HGEMM_CUDA_FILES hgemm_final 80)
 
 if(NOT SELECTED_HGEMM_CUDA_FILES)
     message(WARNING "No hgemm CUDA implementation found for ARCH=${ARCH}")

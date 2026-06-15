@@ -135,9 +135,9 @@ struct Handlers {
         }
         char * implName = argv[3];
         std::map<std::vector<int>, float> results;
-    
         try {
             Implementation impl = implementationsMap.at(implName);
+            printf("-- Running %s -- %s\n", argv[2], implName);
             for (std::vector<int> sizes : SIZES) {
                 printf("\nStarting benchmark for size %d...\n", sizes[0]);
                 float gflops = runnerFunc(impl, sizes, BENCH_RUNS, WARMUP_RUNS, false, true, argc, argv);

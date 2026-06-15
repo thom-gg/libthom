@@ -14,7 +14,7 @@
 
 
 namespace hgemm {
-    static const std::vector<std::vector<int>> SIZES = {{512,512,512}};
+    static const std::vector<std::vector<int>> SIZES = {{512,512,512}, {1024,1024,1024}, {2048, 2048, 2048}};
     
     static __half * cpuA;
     static __half * cpuB;
@@ -41,6 +41,9 @@ namespace hgemm {
     static const std::unordered_map<std::string, HgemmImpl> hgemmImpls = {
     #if LIB_HAS(HGEMM_CUBLAS)
         {"cublas", hgemm_cublas},
+    #endif
+    #if LIB_HAS(HGEMM_CUBLAS)
+        {"final", hgemm_final},
     #endif
     };
  

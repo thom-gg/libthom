@@ -9,4 +9,4 @@ add_executable(${PROJECT_NAME}
     main.cpp
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE libroutines CUDA::cublas CUDA::curand)
+target_link_libraries(${PROJECT_NAME} PRIVATE libroutines CUDA::cudart CUDA::cublas CUDA::curand)
