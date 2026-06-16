@@ -39,7 +39,7 @@ __device__ void loadTile(int tid, int K, int N, __half * As, const __half * A, _
 
         size_t aAddr = __cvta_generic_to_shared(&As[row*ldaShared+col]);
 
-        asm volatile ("cp.async.ca.shared.global [%0], [%1], 16;"
+        asm volatile ("cp.async.ca.shared.global [%0], [%1], 4;"
                 :: "l"(aAddr), // dst 
                     "l"(&A[(blockIdx.x * BM + row) * K + (col + blockOffset)]) // src
         );
@@ -52,7 +52,7 @@ __device__ void loadTile(int tid, int K, int N, __half * As, const __half * A, _
 
         size_t bAddr = __cvta_generic_to_shared(&Bs[row*ldbShared+col]);
 
-        asm volatile ("cp.async.ca.shared.global [%0], [%1], 16;"
+        asm volatile ("cp.async.ca.shared.global [%0], [%1], 4;"
                         :: "l"(bAddr), // dst 
                             "l"(&B[(row + blockOffset) * N + (blockIdx.y * BN + col)]) // src
         );
@@ -178,10 +178,10 @@ __global__ void hgemm_final_kernel(const __half* A, const __half* B, __half* C, 
                 // coords of c0, c1 is just c0 + 1
                 int row = laneId < 16 ? laneId % 4 : (laneId %4) +4;
                 int col = 0; // first __half2 is at col0, second at col2, third at col4 and last at col6
-                __half2 h0 = *reinterpret_cast<__half2*>(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]);
-                __half2 h1 = *reinterpret_cast<__half2*>(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1]);
-                __half2 h2 = *reinterpret_cast<__half2*>(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][2]);
-                __half2 h3 = *reinterpret_cast<__half2*>(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][3]);
+                __half2 h0 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]);
+                __half2 h1 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1]);
+                __half2 h2 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][2]);
+                __half2 h3 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][3]);
 
                 int globalMemRow = blockIdx.x * BM + warpRow * WM + warpSubTileRow * WSUBM + row;
                 int globalMemCol = blockIdx.y * BN + warpCol * WN + warpSubTileCol * WSUBN + col;

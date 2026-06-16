@@ -182,7 +182,7 @@ namespace hgemm {
 
         for (int i = -1*nb_warmup_runs; i<nb_runs; i++) {
             float time_ms = impl(gpuA, gpuB, gpuC, M, N, K, cpuAlpha, cpuBeta);
-    
+            CUDA_CHECK(cudaGetLastError());
             
             if (checkResult) {
                 compareToReference(M, N, K);
