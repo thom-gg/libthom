@@ -1,5 +1,35 @@
 #include "sdot.h"
 
+/* Performs warp-level reduction in registers, therefore without needing any synchronization */
+// NOTE: using /= 2 generates a shift-right ptx instruction, we're not paying the cost of division here, 
+// and it's more readable than "offset>>=1"
+__device__ __forceinline__ float warp_reduce(float laneValue) {
+    for (int offset = 16; offset > 0; offset /= 2) {
+        laneValue += __shfl_down_sync(0xffffffff, laneValue, offset);
+    }
+    return laneValue;
+};
+
+/* When calling this function, threads in lane 0 (threadIdx.x % 32 == 0) are expected to hold the `warpValue` for their whole
+warp, and the function will perform a block-wide reduction in SMEM and write the final value in `resultAddress`.  This is the same
+behavior needed in both kernels for this implementation */
+__device__ __forceinline__ void block_reduce(int laneIdx, int warpIdx, int nbWarps, float warpValue, float * smem, float * resultAddress) {
+    // First thread of each warp writes it's value (representing its whole warp) in smem
+    if (laneIdx == 0) { 
+        smem[warpIdx] = warpValue;
+    }
+    __syncthreads();
+    for (int stride = nbWarps / 2; stride > 0; stride /= 2) {
+        if (threadIdx.x < stride) {
+            smem[threadIdx.x] += smem[threadIdx.x + stride];
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0) {
+        *resultAddress = smem[0];
+    }
+};
 
 /* This kernel performs a reduction using warp-level methods and then shared memory for inter-warp reduction, and each block
 writes its result in GMEM (for a second kernel to later perform reduction of block results)*/
@@ -37,64 +67,37 @@ __global__ void sdot_dot_product_block(int n, const float * x, const float * y, 
         localResult = 0.0f;
     }
     
-
     // Perform warp level reduction to get one value per warp
-    for (int offset = 16; offset > 0; offset /= 2) {
-        localResult += __shfl_down_sync(0xffffffff, localResult, offset);
-    }
+    localResult = warp_reduce(localResult);
 
-    if (lane == 0) { // only first thread of each warp writes in shmem
-        shmem[threadIdx.x / 32] = localResult;
-    }
-
-    __syncthreads();
-
-    
-    // After loading values per thread, perform block-wise reduction
-    for (int stride = nbWarpsInBlock / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.x < stride) {
-            shmem[threadIdx.x] += shmem[threadIdx.x + stride];
-        }
-        __syncthreads();
-    }
-
-    if (threadIdx.x == 0) {
-        resultsBlocks[blockIdx.x] = shmem[0];
-    }
+    // Block-wide inter-warp reduction in SMEM
+    block_reduce(lane, threadIdx.x / 32, nbWarpsInBlock, localResult, shmem, &(resultsBlocks[blockIdx.x]));
 }
+
 
 /* This kernel is launched on a single block and perform a reduction on a global memory array */
 __global__ void sdot_reduction_1block(int nbBlocks, float * result, float * resultsBlocks) {
-    // NOTE: TODO:
-    // as i'm cleaning up this code i realize this reduction could be warp-level first then use shmem if there are more than
-    // 32 elements to reduce. I don't have a GPU rn to test it out so i'm not implementing it yet but this should be done.
-    int idx = threadIdx.x; // there will be only one block
-
     extern __shared__ float shmem[];
-    shmem[idx] = 0;
-    // Every thread loads it's corresponding element into shmem. If there are more elements than threads, perform the addition
-    // as we are iterating through GMEM
+    int idx = threadIdx.x; // there will be only one block
+    int warpLane = idx % 32;
+    int warpIdx = idx / 32;
+    int nbWarps = blockDim.x / 32;
+    
+    // Load values from GMEM to registers
+    float laneVal = 0.0f;
     for (int i = idx; i<nbBlocks; i += blockDim.x) {
-        shmem[idx] += resultsBlocks[i];
+        laneVal += resultsBlocks[i];
     }
-
-
-    __syncthreads();
-
-    int logicalSize = blockDim.x;
-    while (logicalSize > 1) {
-        int stride = (logicalSize+1) >> 1;
-        if (idx < stride && (idx+stride) < logicalSize) {
-            shmem[idx] += shmem[idx + stride];
-        }
-        __syncthreads();
-        logicalSize = stride;
-    }   
-
-    if (idx == 0) {
-        *result = shmem[0];
-    }
+    
+    // Warp-level reduction
+    // Each lane 0 has results for the whole warp
+    laneVal = warp_reduce(laneVal);
+    
+    // Block-wide inter-warp reduction in SMEM
+    block_reduce(warpLane, warpIdx, nbWarps, laneVal, shmem, result);
 }
+
+
 float sdot_warp(int n, const float * x, const float * y, float * result) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
