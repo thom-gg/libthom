@@ -94,9 +94,9 @@ namespace sdot {
     }
     
     float getReferenceResults(int N) {
-        float localValue = 0.0f;
+        double localValue = 0.0f;
         for (int i = 0; i<N; i++) {
-            localValue += cpuX[i] * cpuY[i];
+            localValue += (double)cpuX[i] * (double)cpuY[i];
         }
         return localValue;
     }

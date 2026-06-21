@@ -59,9 +59,9 @@ void resetVectors(int N) {
 }
 
 float getReferenceResults(int N) {
-    float localValue = 0.0f;
+    double localValue = 0.0;
     for (int i = 0; i<N; i++) {
-        localValue += cpuX[i];
+        localValue += (double)cpuX[i];
     }
     return localValue;
 }
