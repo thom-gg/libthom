@@ -1,5 +1,13 @@
 #include "sdot.h"
 
+/* NOT THE OPTIMIZED ONE
+This implementation is just kept to see the evolution of different implementations
+
+For a clean, commented, and optimized one see:
+
+------- sdot_warp.cu --------
+*/
+
 
 __global__ void sdotFoldVecKernel1(int n, const float * x, const float * y, float * resultsBlocks) {
     // each thread is going to take care of 4 elems

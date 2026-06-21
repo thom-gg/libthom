@@ -1,5 +1,12 @@
 #include "sdot.h"
 
+/* NOT THE OPTIMIZED ONE
+This implementation is just kept to see the evolution of different implementations
+
+For a clean, commented, and optimized one see:
+
+------- sdot_warp.cu --------
+*/
 
 __global__ void sdotKernel(int n, const float * x, const float * y, float * result) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
