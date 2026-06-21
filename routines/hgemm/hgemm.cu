@@ -42,7 +42,7 @@ namespace hgemm {
     #if LIB_HAS(HGEMM_CUBLAS)
         {"cublas", hgemm_cublas},
     #endif
-    #if LIB_HAS(HGEMM_CUBLAS)
+    #if LIB_HAS(HGEMM_FINAL)
         {"final", hgemm_final},
     #endif
     };

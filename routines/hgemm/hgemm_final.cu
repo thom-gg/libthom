@@ -9,21 +9,24 @@
 #define WN 32
 #define WM 32
 
-#define WSUBM 8 
+#define WSUBM 16 
 #define WSUBN 8 
 
 #define WNITER (WN / WSUBN)
 #define WMITER (WM / WSUBM)
 
 
-// mma m8n8k4 f16
+// mma m16n8k8 f16
+#define MMA_M 16
+#define MMA_N 8
+#define MMA_K 8
 #define A_FRAGMENT_VALUES 2 // 2 __half2 per thread
-#define B_FRAGMENT_VALUES 2 // 2 __half2 per thread
-#define C_FRAGMENT_VALUES 4 // 4 __half2 per thread
+#define B_FRAGMENT_VALUES 1 // 2 __half2 per thread
+#define C_FRAGMENT_VALUES 2 // 4 __half2 per thread
 
 // resolvign bank conflicts
-#define PADDING_AS 4
-#define PADDING_BS 8
+#define PADDING_AS 0
+#define PADDING_BS 0
 
 
 // load a tile from GMEM to SHMEM using cp.async instructions
@@ -60,6 +63,8 @@ __device__ void loadTile(int tid, int K, int N, __half * As, const __half * A, _
 
     asm volatile("cp.async.commit_group ;");
 }
+
+
 
 __global__ void hgemm_final_kernel(const __half* A, const __half* B, __half* C, size_t M, size_t N, size_t K,__half alpha, __half beta) {
     extern __shared__ __align__(16) __half shmem[];
@@ -122,42 +127,55 @@ __global__ void hgemm_final_kernel(const __half* A, const __half* B, __half* C, 
         // compute current buffer
         // ======== OK NOW WE DO SOME COMPUTE 
         // with tensor cores.
-        for (int dotIdx = 0; dotIdx < BK; dotIdx+=4) {
+        for (int dotIdx = 0; dotIdx < BK; dotIdx+=MMA_K) {
             // load a values into register
             for (int warpSubTileRow = 0; warpSubTileRow<WMITER; warpSubTileRow++) {
-                // load this A fragment
-                int row = laneId < 16 ? laneId % 4 : (laneId % 4) + 4;
-                {
-                    // a0-a1 (packed together into a __half2)
-                    int col = 0; // to read a0
-                    regAFragment[0] = *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
-                }
-                {
-                    // a2-a3 (packed together into a __half2)
-                    int col = 2; // to read a2
-                    regAFragment[1] =  *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
-                }
+                // Loading A fragment
+                int row = laneId % 16;
+                int col= 0;
+            
+                size_t ptr64bit = __cvta_generic_to_shared(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col)]);
+                uint32_t ptr = static_cast<uint32_t>(ptr64bit);
+                asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [%2];"
+                    : "=r"(regAFragment[0]), "=r"(regAFragment[1]) 
+                    : "r"(ptr)
+                );
+
+
+                // // load this A fragment
+                // {
+                //     // a0-a1 (packed together into a __half2)
+                //     int row = groupID;
+                //     int col = threadID_in_group * 2 + (0 & 0x1) ; // to read a0-a1
+                //     regAFragment[0] = *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
+                // }
+                // {
+                //     // a2-a3 (packed together into a __half2)
+                //     int row = groupID + 8;
+                //     int col = threadID_in_group * 2 + (2 & 0x1) ; // to read a2-a3
+                //     regAFragment[1] =  *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
+                // }
                 for (int warpSubTileCol = 0; warpSubTileCol<WNITER; warpSubTileCol++) {
                     // A fragment is reused
                     // load B fragment
-                    int row = laneId % 4;
                     {
                         // b0-b1 packed together into a __half2
-                        int col = laneId < 16 ? 0 : 4; // for b0
-                        regBFragment[0] = *reinterpret_cast<uint32_t*>(&Bs[(current_buf * (BK*ldbShared)) + (dotIdx + row) * ldbShared + (warpCol * WN + warpSubTileCol * WSUBN + col)]);
+                        int row0 = (threadID_in_group * 2) + 0; // for b0
+                        int row1 = (threadID_in_group * 2) + 1; // for b1
+                        int col =  groupID;
+                        __half2 bVals = make_half2(
+                                    Bs[(current_buf * (BK*ldbShared)) + (dotIdx + row0) * ldbShared + (warpCol * WN + warpSubTileCol * WSUBN + col)]
+                                    ,
+                                    Bs[(current_buf * (BK*ldbShared)) + (dotIdx + row1) * ldbShared + (warpCol * WN + warpSubTileCol * WSUBN + col)]);
+                        regBFragment[0] = *reinterpret_cast<uint32_t*>(&bVals);
                     }
-                    {
-                        // b2-b3 packed together into a __half2
-                        int col = laneId < 16 ? 2 : 6; // for b2
-                        regBFragment[1] = *reinterpret_cast<uint32_t*>(&Bs[(current_buf * (BK*ldbShared)) + (dotIdx + row) * ldbShared + (warpCol * WN + warpSubTileCol * WSUBN + col)]);
-                    }
+                    
                     // have WMITER*WNITER C fragments that are reused always
                     // perform MMA
-                    asm volatile("mma.sync.aligned.m8n8k4.row.col.f16.f16.f16.f16 {%0,%1,%2,%3}, {%4,%5}, {%6,%7}, {%8,%9,%10,%11};"
-                                : "=r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]), "=r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1]),"=r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][2]),"=r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][3])
-                                : "r"(regAFragment[0]), "r"(regAFragment[1]), "r"(regBFragment[0]),"r"(regBFragment[1]),
-                                  "r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]), "r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1]), "r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][2]), "r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][3])
-                                : "memory"
+                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 {%0,%1}, {%2,%3}, {%4}, {%5,%6};"
+                                : "=r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]), "=r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1])
+                                : "r"(regAFragment[0]), "r"(regAFragment[1]), "r"(regBFragment[0]),
+                                  "r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]), "r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1])
                                 );
                 }
             }
@@ -174,33 +192,25 @@ __global__ void hgemm_final_kernel(const __half* A, const __half* B, __half* C, 
     for (int warpSubTileRow = 0; warpSubTileRow<WMITER; warpSubTileRow++) {
         for (int warpSubTileCol = 0; warpSubTileCol<WNITER; warpSubTileCol++) {
             {
-                // write the two values with a vectorized write
-                // coords of c0, c1 is just c0 + 1
-                int row = laneId < 16 ? laneId % 4 : (laneId %4) +4;
-                int col = 0; // first __half2 is at col0, second at col2, third at col4 and last at col6
-                __half2 h0 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]);
-                __half2 h1 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1]);
-                __half2 h2 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][2]);
-                __half2 h3 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][3]);
-
+                // c0 and c1
+                int row = groupID;
+                int col = (threadID_in_group * 2) + (0 & 0x1); // c0
                 int globalMemRow = blockIdx.x * BM + warpRow * WM + warpSubTileRow * WSUBM + row;
                 int globalMemCol = blockIdx.y * BN + warpCol * WN + warpSubTileCol * WSUBN + col;
-
-                // alpha * regC + beta * C
-                h0 = __hadd2(__hmul2(alpha2, h0), __hmul2(beta2, *reinterpret_cast<__half2*>(&C[globalMemRow * N + globalMemCol+0])));
-                h1 = __hadd2(__hmul2(alpha2, h1), __hmul2(beta2, *reinterpret_cast<__half2*>(&C[globalMemRow * N + globalMemCol+2])));
-                h2 = __hadd2(__hmul2(alpha2, h2), __hmul2(beta2, *reinterpret_cast<__half2*>(&C[globalMemRow * N + globalMemCol+4])));
-                h3 = __hadd2(__hmul2(alpha2, h3), __hmul2(beta2, *reinterpret_cast<__half2*>(&C[globalMemRow * N + globalMemCol+6])));
-
-                uint4 out = make_uint4(
-                    reinterpret_cast<uint32_t&>(h0),
-                    reinterpret_cast<uint32_t&>(h1),
-                    reinterpret_cast<uint32_t&>(h2),
-                    reinterpret_cast<uint32_t&>(h3)
-                );
-
-                // write the 4 __half2 (i.e 8 __half => 128bits in memory)
-                *reinterpret_cast<uint4*>(&C[globalMemRow * N + globalMemCol]) = out;
+                __half2 h0 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]);
+                h0 = __hadd2(__hmul2(alpha2, h0), __hmul2(beta2, *reinterpret_cast<__half2*>(&C[globalMemRow * N + globalMemCol])));
+                // write back a half2
+                *reinterpret_cast<uint32_t*>(&C[globalMemRow * N + globalMemCol]) = reinterpret_cast<uint32_t&>(h0);
+            }
+            {
+                // c2 and c3
+                int row = groupID + 8;
+                int col = (threadID_in_group * 2) + (2 & 0x1); // c2
+                int globalMemRow = blockIdx.x * BM + warpRow * WM + warpSubTileRow * WSUBM + row;
+                int globalMemCol = blockIdx.y * BN + warpCol * WN + warpSubTileCol * WSUBN + col;
+                __half2 h1 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1]);
+                h1 = __hadd2(__hmul2(alpha2, h1), __hmul2(beta2, *reinterpret_cast<__half2*>(&C[globalMemRow * N + globalMemCol+0])));
+                *reinterpret_cast<uint32_t*>(&C[globalMemRow * N + globalMemCol]) = reinterpret_cast<uint32_t&>(h1);
             }    
         }
     }
