@@ -17,7 +17,7 @@ float hgemm_cublas(const __half* A, const __half* B, __half* C, size_t M, size_t
             A,CUDA_R_16F,K,
             &beta,
             C,CUDA_R_16F,N,
-            CUBLAS_COMPUTE_16F_PEDANTIC,
+            CUBLAS_COMPUTE_16F,
             CUBLAS_GEMM_DEFAULT
         );
 
