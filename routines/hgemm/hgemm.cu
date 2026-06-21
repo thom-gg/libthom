@@ -4,7 +4,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/transform.h>
 
-#define BENCH_RUNS 10
+#define BENCH_RUNS 30
 #define WARMUP_RUNS 5
 
 
@@ -14,7 +14,17 @@
 
 
 namespace hgemm {
-    static const std::vector<std::vector<int>> SIZES = {{512,512,512}, {1024,1024,1024}, {2048, 2048, 2048}};
+    static const std::vector<std::vector<int>> SIZES = {
+        {512,512,512}, 
+        {1024,1024,1024}, 
+        {1536, 1536, 1536}, 
+        {2048, 2048, 2048}, 
+        {2560, 2560, 2560}, 
+        {3072, 3072, 3072},
+        {3584, 3584, 3584},
+        {4096, 4096, 4096},
+        {8192, 8192, 8192}
+    };
     
     static __half * cpuA;
     static __half * cpuB;
