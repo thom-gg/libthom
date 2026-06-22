@@ -3,23 +3,23 @@
 #define BM 64
 #define BN 128
 #define BK 16
-#define WN 32
-#define WM 32
+#define WN 128
+#define WM 64
 
-#define WSUBM 16 
-#define WSUBN 8 
+// mma m16n8k16 f16
+#define MMA_M 16
+#define MMA_N 8
+#define MMA_K 16
+#define A_FRAGMENT_VALUES 4 // 4 __half2 per thread
+#define B_FRAGMENT_VALUES 2 // 2 __half2 per thread
+#define C_FRAGMENT_VALUES 2 // 2 __half2 per thread
+
+/* WSUBN ET WSUBM doivent couvrir la taille d'une instruction mma*/
+#define WSUBM MMA_M 
+#define WSUBN MMA_N
 
 #define WNITER (WN / WSUBN)
 #define WMITER (WM / WSUBM)
-
-
-// mma m16n8k8 f16
-#define MMA_M 16
-#define MMA_N 8
-#define MMA_K 8
-#define A_FRAGMENT_VALUES 2 // 2 __half2 per thread
-#define B_FRAGMENT_VALUES 1 // 2 __half2 per thread
-#define C_FRAGMENT_VALUES 2 // 4 __half2 per thread
 
 // Padding to resolve bank conflicts
 #define PADDING_AS 0
@@ -148,14 +148,28 @@ __global__ void hgemm_final_kernel(const __half* A, const __half* B, __half* C, 
                 {
                     // a0-a1 (packed together into a __half2)
                     int row = groupID;
-                    int col = threadID_in_group * 2 + (0 & 0x1) ; // to read a0-a1
+                    int col = (threadID_in_group * 2) + (0 & 0x1) ; // to read a0-a1
                     regAFragment[0] = *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
                 }
                 {
                     // a2-a3 (packed together into a __half2)
                     int row = groupID + 8;
-                    int col = threadID_in_group * 2 + (2 & 0x1) ; // to read a2-a3
+                    int col = (threadID_in_group * 2) + (2 & 0x1) ; // to read a2-a3
                     regAFragment[1] =  *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
+                }
+                {
+                    // a4-a5
+                    int row = groupID;
+                    int col = (threadID_in_group * 2) + (4 & 0x1) + 8; // to read a4-a5
+                    regAFragment[2] =  *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
+
+                }
+                {
+                    //a6-a7
+                    int row = groupID + 8;
+                    int col = (threadID_in_group * 2) + (6 & 0x1) + 8; // to read a6-a7
+                    regAFragment[3] =  *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
+
                 }
                 for (int warpSubTileCol = 0; warpSubTileCol<WNITER; warpSubTileCol++) {
                     // A fragment is reused
@@ -171,12 +185,25 @@ __global__ void hgemm_final_kernel(const __half* A, const __half* B, __half* C, 
                                     Bs[(current_buf * (BK*ldbShared)) + (dotIdx + row1) * ldbShared + (warpCol * WN + warpSubTileCol * WSUBN + col)]);
                         regBFragment[0] = *reinterpret_cast<uint32_t*>(&bVals);
                     }
+                    {
+                        // b2-b3 packed together
+                        int row0 = (threadID_in_group * 2) + (2 & 0x1) + 8; // for b2
+                        int row1 = (threadID_in_group * 2) + (3 & 0x1) + 8; // for b3
+                        int col =  groupID;
+                        __half2 bVals = make_half2(
+                                    Bs[(current_buf * (BK*ldbShared)) + (dotIdx + row0) * ldbShared + (warpCol * WN + warpSubTileCol * WSUBN + col)]
+                                    ,
+                                    Bs[(current_buf * (BK*ldbShared)) + (dotIdx + row1) * ldbShared + (warpCol * WN + warpSubTileCol * WSUBN + col)]);
+                        regBFragment[1] = *reinterpret_cast<uint32_t*>(&bVals);
+
+                    }
                     
                     // have WMITER*WNITER C fragments that are reused always
                     // perform MMA
-                    asm volatile("mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 {%0,%1}, {%2,%3}, {%4}, {%5,%6};"
+                    asm volatile("mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%0,%1}, {%2,%3,%4,%5}, {%6,%7}, {%8,%9};"
                                 : "=r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]), "=r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1])
-                                : "r"(regAFragment[0]), "r"(regAFragment[1]), "r"(regBFragment[0]),
+                                : "r"(regAFragment[0]), "r"(regAFragment[1]), "r"(regAFragment[2]), "r"(regAFragment[3]), 
+                                    "r"(regBFragment[0]),"r"(regBFragment[1]),
                                   "r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]), "r"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1])
                                 );
                 }
