@@ -25,9 +25,27 @@
 #define PADDING_AS 0
 #define PADDING_BS 0
 
+/* Multi-buffering stages*/
+#define N_STAGES 3
+
 
 // constraints:
 // sizes must be multiples of 8 (for loading from gmem to smem we dont take care of edge cases if not multiple of 8)
+
+
+
+
+// Wrapper device function that issues a "cp.async.wait_group N" instruction. it means it will wait until N or fewer groups are pending
+__device__ __forceinline__ void cp_async_wait(int pending_groups) {
+    if      (pending_groups == 0) asm volatile("cp.async.wait_group 0;");
+    else if (pending_groups == 1) asm volatile("cp.async.wait_group 1;");
+    else if (pending_groups == 2) asm volatile("cp.async.wait_group 2;");
+    else if (pending_groups == 3) asm volatile("cp.async.wait_group 3;");
+    else if (pending_groups == 4) asm volatile("cp.async.wait_group 4;");
+    else if (pending_groups == 5) asm volatile("cp.async.wait_group 5;");
+    else if (pending_groups == 6) asm volatile("cp.async.wait_group 6;");
+
+}
 
 
 // load a tile from GMEM to SMEM using cp.async instructions
@@ -81,9 +99,9 @@ __global__ void hgemm_final_kernel(const __half* A, const __half* B, __half* C, 
     int ldaShared = BK+PADDING_AS;
     int ldbShared = BN+PADDING_BS;
 
-    /* We do double buffering so we need to reserve twice the size of 1 A tile for `As` */
+    /* We do multi-stage buffering so we need to reserve twice the size of 1 A tile for `As` */
     __half * As = shmem;
-    __half * Bs = shmem + 2* (BM * ldaShared);
+    __half * Bs = shmem + N_STAGES * (BM * ldaShared);
 
 
     int tid = threadIdx.x;
@@ -111,69 +129,54 @@ __global__ void hgemm_final_kernel(const __half* A, const __half* B, __half* C, 
 
     // Loading the very first tiles before starting the double buffering loop 
     {
-        int selectedBuffer = 0;
-        loadTile(tid, K, N, &As[selectedBuffer * (BM * ldaShared)], A, &Bs[selectedBuffer * (BK * ldbShared)], B, 0, ldaShared, ldbShared); 
-        asm volatile("cp.async.wait_group 0 ;");
+        /* issue first copy instructions (N_STAGES-1, because one will be issued at the beginning of the following loop)*/
+        #pragma unroll
+        for (int selectedBuffer = 0; selectedBuffer < N_STAGES-1 ; selectedBuffer++) {
+            loadTile(tid, K, N, &As[selectedBuffer * (BM * ldaShared)], A, &Bs[selectedBuffer * (BK * ldbShared)], B, selectedBuffer*BK, ldaShared, ldbShared); 
+        }
+        // Wait until at least one group is finished, which means (N_STAGES-2) groups or less are still pending
+        cp_async_wait(N_STAGES-2);
         __syncthreads();
     }
     
     for (int blockOffset = 0; blockOffset<K; blockOffset += BK) {
         int kTile = blockOffset/BK;
-        int current_buf = kTile % 2; // 0 or 1
-        int next_buf = (kTile+1) %2; // 0 or 1
+        int current_buf = kTile % N_STAGES; // [0,N_STAGES[
+        // we want to load the furthest possible buffer. (i.e kTile+N_STAGES-1) 
+        int buf_to_load = (kTile+N_STAGES-1) % N_STAGES; // [0,N_STAGES[
 
-        // load next buffer into shmem
-        loadTile(tid, K, N, &As[next_buf * (BM* ldaShared)], A, &Bs[next_buf * (BK*ldbShared)], B, blockOffset + BK, ldaShared, ldbShared);
-        // wait for current buffer (literally wait until only 1 group is pending (i.e wait until only next buffer is pending))
+        // issue load of next buffer into shmem
+        loadTile(tid, K, N, &As[buf_to_load * (BM* ldaShared)], A, &Bs[buf_to_load * (BK*ldbShared)], B, blockOffset + (N_STAGES-1) * BK, ldaShared, ldbShared);
         
-
-
 
         /* ========= Starting to do some compute with Tensor Cores */
         for (int dotIdx = 0; dotIdx < BK; dotIdx+=MMA_K) {
             for (int warpSubTileRow = 0; warpSubTileRow<WMITER; warpSubTileRow++) {
                 /* Loading A Fragment with ldmatrix PTX instruction*/
-                // int row = laneId % 16;
-                // int col= 0;
+                int row = laneId % 16;
+                int col= (laneId / 16) * 8;
             
-                // size_t ptr64bit = __cvta_generic_to_shared(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col)]);
-                // uint32_t ptr = static_cast<uint32_t>(ptr64bit);
-                // asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [%2];"
-                //     : "=r"(regAFragment[0]), "=r"(regAFragment[1]) 
-                //     : "r"(ptr)
-                // );
+                size_t ptr64bit = __cvta_generic_to_shared(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col)]);
+                uint32_t ptr = static_cast<uint32_t>(ptr64bit);
+                asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];"
+                    : "=r"(regAFragment[0]), "=r"(regAFragment[1]), "=r"(regAFragment[2]), "=r"(regAFragment[3]) 
+                    : "r"(ptr)
+                );
 
 
-                // Loading A fragment manually
-                {
-                    // a0-a1 (packed together into a __half2)
-                    int row = groupID;
-                    int col = (threadID_in_group * 2) + (0 & 0x1) ; // to read a0-a1
-                    regAFragment[0] = *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
-                }
-                {
-                    // a2-a3 (packed together into a __half2)
-                    int row = groupID + 8;
-                    int col = (threadID_in_group * 2) + (2 & 0x1) ; // to read a2-a3
-                    regAFragment[1] =  *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
-                }
-                {
-                    // a4-a5
-                    int row = groupID;
-                    int col = (threadID_in_group * 2) + (4 & 0x1) + 8; // to read a4-a5
-                    regAFragment[2] =  *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
-
-                }
-                {
-                    //a6-a7
-                    int row = groupID + 8;
-                    int col = (threadID_in_group * 2) + (6 & 0x1) + 8; // to read a6-a7
-                    regAFragment[3] =  *reinterpret_cast<uint32_t*>(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col) ]); 
-
-                }
                 for (int warpSubTileCol = 0; warpSubTileCol<WNITER; warpSubTileCol++) {
                     // A fragment is reused
                     // Load B fragment manually
+                    /* Loading B Fragment with ldmatrix PTX instruction*/
+                    // int row = laneId % 16;
+                    // int col = 0;
+                
+                    // size_t ptr64bit = __cvta_generic_to_shared(&Bs[(current_buf * (BK*ldbShared)) + (dotIdx + row) * ldbShared + (warpCol * WN + warpSubTileCol * WSUBN + col)]);
+                    // uint32_t ptr = static_cast<uint32_t>(ptr64bit);
+                    // asm volatile("ldmatrix.sync.aligned.m8n8.trans.x2.shared.b16 {%0, %1}, [%2];"
+                    //     : "=r"(regBFragment[0]), "=r"(regBFragment[1]) 
+                    //     : "r"(ptr)
+                    // );
                     {
                         // b0-b1 packed together into a __half2
                         int row0 = (threadID_in_group * 2) + 0; // for b0
@@ -211,8 +214,8 @@ __global__ void hgemm_final_kernel(const __half* A, const __half* B, __half* C, 
             
         }
 
-        // wait for next buffer to be ready before jumping into next iteration
-        asm volatile("cp.async.wait_group 0 ;");
+        // wait until at least one buffer is ready (i.e there's at maximum N_STAGES-1 in flight before jumping into next iteration
+        cp_async_wait(N_STAGES-1);
         __syncthreads();
 
     }
@@ -261,9 +264,9 @@ float hgemm_final(const __half* A, const __half* B, __half* C, size_t M, size_t 
     int threadsPerBlock = nbWarps * 32;
     dim3 nbBlocks((M/ BM), (N / BN));
 
-    // x2 for double buffering
-    size_t shmemSizeForA = 2 * (BM * (BK + PADDING_AS)) * sizeof(__half); // in each line we add 4 elements of padding
-    size_t shmemSizeForB = 2 * (BK * (BN + PADDING_BS)) * sizeof(__half);
+    // x N_STAGES for multi-stage buffering
+    size_t shmemSizeForA = N_STAGES * (BM * (BK + PADDING_AS)) * sizeof(__half);
+    size_t shmemSizeForB = N_STAGES * (BK * (BN + PADDING_BS)) * sizeof(__half);
     size_t shmemSize = shmemSizeForA + shmemSizeForB;
     cudaError_t err = cudaFuncSetAttribute(
         hgemm_final_kernel,
