@@ -53,6 +53,14 @@ __device__ __forceinline__ int swizzleBCol(int row, int col) {
     return col ^ ((row & 7) << 3);
 }
 
+__device__ __forceinline__ int swizzleACol(int row, int col) {
+    // col est un multiple de 8 (index de chunk * 8), BK/8 = 4 chunks
+    int chunkIndex = col >> 3;
+    int mask = (row >> 1) & 3;      // ignore le bit de parité (non swizzlable), utilise les bits suivants
+    int physChunk = chunkIndex ^ mask;
+    return physChunk << 3;
+}
+
 
 // load a tile from GMEM to SMEM using cp.async instructions
 // Even if doing double buffering, the As and Bs variables passed to this method should be the correct buffers for the load we want to issue. (this function is not going to determine it by itself)
@@ -71,7 +79,8 @@ __device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, con
         int row = loadIndex / BK;
         int col = loadIndex % BK;
 
-        size_t aAddr = __cvta_generic_to_shared(&As[row*ldaShared+col]);
+        int physCol = swizzleACol(row, col); 
+        size_t aAddr = __cvta_generic_to_shared(&As[row*ldaShared+physCol]);
 
         asm volatile ("cp.async.ca.shared.global [%0], [%1], 16;" /* 16 bytes -> 8 fp16*/
                 :: "l"(aAddr), // dst 
@@ -164,10 +173,13 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
 
             /* Load all A fragments */
             for (int warpSubTileRow = 0; warpSubTileRow<WMITER; warpSubTileRow++) {
-                int row = laneId % 16;
-                int col= (laneId / 16) * 8;
+                int rowLocal = laneId % 16;
+                int colLocal= (laneId / 16) * 8;
+                int fullRow = warpRow * WM + warpSubTileRow * WSUBM + rowLocal;   // ligne globale, doit matcher le store
+                int logicalCol = dotIdx + colLocal;
+                int physCol = swizzleACol(fullRow, logicalCol);
             
-                size_t ptr64bit = __cvta_generic_to_shared(&As[(current_buf * (BM*ldaShared)) + (warpRow * WM + warpSubTileRow * WSUBM + row) * ldaShared + (dotIdx + col)]);
+                size_t ptr64bit = __cvta_generic_to_shared(&As[(current_buf * (BM*ldaShared)) + fullRow * ldaShared + physCol]);
                 uint32_t ptr = static_cast<uint32_t>(ptr64bit);
                 asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];"
                     : "=r"(regAFragment[warpSubTileRow][0]), "=r"(regAFragment[warpSubTileRow][1]), "=r"(regAFragment[warpSubTileRow][2]), "=r"(regAFragment[warpSubTileRow][3]) 
