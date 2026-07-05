@@ -2,7 +2,7 @@
 
 #define BM 128
 #define BN 128
-#define BK 32
+#define BK 64
 #define WN 64
 #define WM 64
 
@@ -26,7 +26,7 @@
 #define PADDING_BS 0
 
 /* Multi-buffering stages*/
-#define N_STAGES 3
+#define N_STAGES 2
 
 
 // constraints:
@@ -56,7 +56,7 @@ __device__ __forceinline__ int swizzleBCol(int row, int col) {
 __device__ __forceinline__ int swizzleACol(int row, int col) {
     // col est un multiple de 8 (index de chunk * 8), BK/8 = 4 chunks
     int chunkIndex = col >> 3;
-    int mask = (row >> 1) & 3;      // ignore le bit de parité (non swizzlable), utilise les bits suivants
+    int mask = (row >> 1) & 3;      // ignore parity bit because two consecutive rows use the same swizzling. '& 3' is basically modulo 4 
     int physChunk = chunkIndex ^ mask;
     return physChunk << 3;
 }
@@ -82,7 +82,7 @@ __device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, con
         int physCol = swizzleACol(row, col); 
         size_t aAddr = __cvta_generic_to_shared(&As[row*ldaShared+physCol]);
 
-        asm volatile ("cp.async.ca.shared.global [%0], [%1], 16;" /* 16 bytes -> 8 fp16*/
+        asm volatile ("cp.async.cg.shared.global [%0], [%1], 16;" /* 16 bytes -> 8 fp16*/
                 :: "l"(aAddr), // dst 
                     "l"(&A[(blockIdx.x * BM + row) * K + (col + blockOffset)]) // src
         );
@@ -98,7 +98,7 @@ __device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, con
 
         size_t bAddr = __cvta_generic_to_shared(&Bs[row*ldbShared+physCol]);
 
-        asm volatile ("cp.async.ca.shared.global [%0], [%1], 16;" /* 16 bytes -> 8 fp16*/
+        asm volatile ("cp.async.cg.shared.global [%0], [%1], 16;" /* 16 bytes -> 8 fp16*/
                         :: "l"(bAddr), // dst 
                             "l"(&B[(row + blockOffset) * N + (blockIdx.y * BN + col)]) // src
         );
