@@ -14,7 +14,7 @@
 
 
 namespace dgemm {
-    static const std::vector<std::vector<int>> SIZES = {{512,512,512}};
+    static const std::vector<std::vector<int>> SIZES = {{512,512,512}, {1024,1024,1024}, {2048, 2048, 2048}};
     
     static double * cpuA;
     static double * cpuB;

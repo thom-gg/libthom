@@ -1,9 +1,9 @@
 #include "hgemm.h"
 
-#define BM 64
+#define BM 128
 #define BN 128
-#define BK 16
-#define WN 128
+#define BK 32
+#define WN 64
 #define WM 64
 
 // mma m16n8k16 f16
@@ -26,7 +26,7 @@
 #define PADDING_BS 0
 
 /* Multi-buffering stages*/
-#define N_STAGES 3
+#define N_STAGES 8
 
 
 // constraints:
@@ -44,6 +44,7 @@ __device__ __forceinline__ void cp_async_wait(int pending_groups) {
     else if (pending_groups == 4) asm volatile("cp.async.wait_group 4;");
     else if (pending_groups == 5) asm volatile("cp.async.wait_group 5;");
     else if (pending_groups == 6) asm volatile("cp.async.wait_group 6;");
+    else if (pending_groups == 7) asm volatile("cp.async.wait_group 7;");
 
 }
 

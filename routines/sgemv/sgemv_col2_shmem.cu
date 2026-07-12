@@ -1,6 +1,16 @@
 #include "sgemv.h"
 
 
+/* NOT THE OPTIMIZED ONE
+This implementation is just kept to see the evolution of different implementations
+
+For clean, commented, and optimized ones see:
+
+------- sgemv_vecto.cu (row major) --------
+------- sgemv_col3_vecto.cu (col major) --------
+
+*/
+
 // 1 thread per row of A (coalesced accesseses to both A and x)
 __global__ void col2_shmem_kernel(int M, int N, const float * alpha, const float * A, int lda, const float * x, int incx, const float * beta, float * y, int incy) {
     int tid = threadIdx.x;

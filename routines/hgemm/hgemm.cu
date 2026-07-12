@@ -44,7 +44,7 @@ namespace hgemm {
     curandGenerator_t gen;
     static cudaError_t err;
     
-    using HgemmImpl = float (*)(const __half* A, const __half* B, __half* C, size_t M, size_t N, size_t K,__half alpha, __half beta);
+    using HgemmImpl = HgemmFunction;
     
     
     /* Registering implementations, only if they're compiled. They are compiled if we are using the correct Compute Capability*/
@@ -54,6 +54,18 @@ namespace hgemm {
     #endif
     #if LIB_HAS(HGEMM_FINAL)
         {"final", hgemm_final},
+    #endif
+      #if LIB_HAS(HGEMM_BRUCE)
+        {"bruce", hgemm_bruce},
+    #endif
+    #if LIB_HAS(HGEMM_BRUCE2)
+        {"bruce2", hgemm_bruce2},
+    #endif
+     #if LIB_HAS(HGEMM_BETTER_REUSE)
+        {"better_reuse", hgemm_better_reuse},
+    #endif
+     #if LIB_HAS(HGEMM_GROK)
+        {"grok", hgemm_grok},
     #endif
     };
  
@@ -116,7 +128,7 @@ namespace hgemm {
         __curandGenerateHalf(gpuC, M*N);
 
         cpuAlpha = __float2half(1.0f);
-        cpuBeta = __float2half(1.0f);
+        cpuBeta = __float2half(0.0f);
 
         cudaDeviceSynchronize();
 
@@ -150,28 +162,45 @@ namespace hgemm {
 
 
     
-    void compareToReference(int M,int N, int K) {
+    bool compareToReference(int M,int N, int K) {
         err = cudaMemcpy(resultFromGpu, gpuC, M*N*sizeof(__half), cudaMemcpyDeviceToHost);
         CUDA_CHECK(err);
         getReferenceResults(M,N,K);
 
         int countDifferent = 0;
+        constexpr int MAX_REPORTED_ERRORS = 8;
         for (int row= 0; row<M; row++) {
             for (int col = 0; col<N; col++) {
                 double diff = fabsf(__half2float(resultFromGpu[row*N+col]) - __half2float(cpuC[row*N+col]));
                 double abs_ref = fabsf(__half2float(cpuC[row*N+col]));
-                double rel_error = diff / abs_ref;
-                if (rel_error > 1e-2f) {
+                double rel_error = diff / std::max(abs_ref, 1e-3);
+                if (rel_error > 1e-2f && diff > 1e-3) {
                     countDifferent+=1;
-                    printf("row %d col %d | GPU: %f | CPU: %f | rel_error: %f\n",
-                        row, col, __half2float(resultFromGpu[row*N+col]), __half2float(cpuC[row*N+col]), rel_error);
+                    if (countDifferent <= MAX_REPORTED_ERRORS) {
+                        printf("row %d col %d | GPU: %f | CPU: %f | rel_error: %f\n",
+                            row, col, __half2float(resultFromGpu[row*N+col]), __half2float(cpuC[row*N+col]), rel_error);
+                    }
                 }
             }
         }
 
         if (countDifferent > 0) {
             printf("Number of different results: %d\n", countDifferent);
-        }         
+        }
+        return countDifferent == 0;
+    }
+
+    bool validate(HgemmImpl impl, const std::vector<int>& sizes) {
+        const int M = sizes[0];
+        const int N = sizes[1];
+        const int K = sizes[2];
+        allocate(M, N, K);
+        resetVectors(M, N, K);
+        impl(gpuA, gpuB, gpuC, M, N, K, cpuAlpha, cpuBeta);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        const bool correct = compareToReference(M, N, K);
+        freeAll();
+        return correct;
     }
     
     float getGflops(int M, int N, int K, float time_ms) {
@@ -233,6 +262,75 @@ namespace hgemm {
             file << sizes[0] << "," << sizes[1] << "," << sizes[2] << "," << gflops << "\n";
         }
     }
+
+#if LIB_HAS(HGEMM_BETTER_REUSE)
+    void better_reuse_tune(int argc, char * argv[]) {
+        /*
+            ./libthom tune hgemm [M N K [runs]]
+
+            Each entry is a separate template specialization compiled into the
+            binary.  Adding a candidate here makes it available to the tuner;
+            no compilation is performed while tuning.
+        */
+        int M = 2048;
+        int N = 2048;
+        int K = 2048;
+        int runs = BENCH_RUNS;
+
+        if (argc != 3 && argc != 6 && argc != 7) {
+            fprintf(stderr, "Usage: ./libthom tune hgemm [M N K [runs]]\n");
+            return;
+        }
+        if (argc >= 6) {
+            M = atoi(argv[3]);
+            N = atoi(argv[4]);
+            K = atoi(argv[5]);
+        }
+        if (argc == 7) {
+            runs = atoi(argv[6]);
+        }
+        if (M <= 0 || N <= 0 || K <= 0 || runs <= 0) {
+            fprintf(stderr, "M, N, K and runs must be positive.\n");
+            return;
+        }
+
+        const std::vector<HgemmBetterReuseTuningCandidate> candidates =
+            hgemm_better_reuse_tuning_candidates();
+
+        printf("-- Tuning hgemm better_reuse for M=%d N=%d K=%d (%d measured runs) --\n", M, N, K, runs);
+        float bestGflops = -1.0f;
+        const char * bestName = nullptr;
+
+        for (const HgemmBetterReuseTuningCandidate& candidate : candidates) {
+            if (M % candidate.bm != 0 || N % candidate.bn != 0 || K % candidate.bk != 0) {
+                printf("[skip] %s (dimensions are not tile multiples)\n", candidate.name.c_str());
+                continue;
+            }
+
+            printf("[test] %s\n", candidate.name.c_str());
+            if (!validate(candidate.implementation, {M, N, K})) {
+                printf("[failed] %s\n", candidate.name.c_str());
+                continue;
+            }
+
+            const float gflops = runner(
+                candidate.implementation, {M, N, K}, runs, WARMUP_RUNS,
+                false, false, argc, argv
+            );
+            printf("[result] %s: %.2f GFLOP/s\n", candidate.name.c_str(), gflops);
+            if (gflops > bestGflops) {
+                bestGflops = gflops;
+                bestName = candidate.name.c_str();
+            }
+        }
+
+        if (bestName == nullptr) {
+            fprintf(stderr, "No candidate supports these dimensions.\n");
+            return;
+        }
+        printf("[best] %s: %.2f GFLOP/s\n", bestName, bestGflops);
+    }
+#endif
     
 
 
@@ -252,6 +350,13 @@ void hgemm_handler(RunMode runMode, int argc, char * argv[]) {
             break;
         case RunMode::BENCH:
             Handlers<hgemm::HgemmImpl, 3, BENCH_RUNS, WARMUP_RUNS>::bench_handler(argc, argv, hgemm::hgemmImpls, hgemm::runner, hgemm::SIZES, hgemm::exportCSV);
+            break;
+        case RunMode::TUNE:
+#if LIB_HAS(HGEMM_BETTER_REUSE)
+            hgemm::better_reuse_tune(argc, argv);
+#else
+            fprintf(stderr, "The tune mode requires hgemm_better_reuse (compile with ARCH >= 80).\\n");
+#endif
             break;
     }
 

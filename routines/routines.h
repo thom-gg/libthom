@@ -14,6 +14,8 @@
 #include <curand_kernel.h>
 #include "cublas_v2.h"
 #include "enums.h"
+#include <algorithm>
+#include <functional>
 
 #define LIB_HAS(name) LIB_HAS_##name
 
@@ -133,6 +135,7 @@ struct Handlers {
             fprintf(stderr, "\n");
             exit(1);
         }
+        char * routineName = argv[2];
         char * implName = argv[3];
         std::map<std::vector<int>, float> results;
         try {
@@ -144,7 +147,7 @@ struct Handlers {
                 results[sizes] = gflops;
                 printf("[size: %d] ==> %f\n", sizes[0], gflops);
             }
-            std::string filename = std::string("bench_") + implName + ".csv";
+            std::string filename = std::string("bench_") + routineName + "_" + implName + ".csv";
             exportFunc(results, filename);
         }
         catch (const std::out_of_range&) {

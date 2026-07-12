@@ -1,0 +1,1 @@
+[best] BM=128 BN=128 BK=32 WM=64 WN=64 stages=2 group_m=8: 168436.84 GFLOP/s

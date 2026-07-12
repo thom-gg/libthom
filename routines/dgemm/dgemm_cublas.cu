@@ -17,7 +17,7 @@ float dgemm_cublas(const double* A, const double* B, double* C, size_t M, size_t
             A,CUDA_R_64F,K,
             &beta,
             C,CUDA_R_64F,N,
-            CUBLAS_COMPUTE_64F_PEDANTIC,
+            CUBLAS_COMPUTE_64F,
             CUBLAS_GEMM_DEFAULT
         );
 

@@ -1,5 +1,16 @@
 #include "sgemv.h"
 
+
+/* NOT THE OPTIMIZED ONE
+This implementation is just kept to see the evolution of different implementations
+
+For clean, commented, and optimized ones see:
+
+------- sgemv_vecto.cu (row major) --------
+------- sgemv_col3_vecto.cu (col major) --------
+
+*/
+
 // 1 block per row of A (i.e per element of y)
 // meaning we do intra-block reduction to get the final value of the cell of y
 // - warp lvl reduction, each warp writes its value into a shmem array (of very small size, probably 4 warps per block smth like that)

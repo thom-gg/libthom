@@ -1,10 +1,6 @@
 #include "hgemm.h"
 
-#define BM 128
-#define BN 128
-#define BK 32
-#define WN 32
-#define WM 64
+
 
 // mma m16n8k16 f16
 #define MMA_M 16
@@ -18,22 +14,18 @@
 #define WSUBM MMA_M 
 #define WSUBN MMA_N
 
-#define WNITER (WN / WSUBN)
-#define WMITER (WM / WSUBM)
+
 
 // Padding to resolve bank conflicts
 #define PADDING_AS 0
 #define PADDING_BS 0
 
-/* Multi-buffering stages*/
-#define N_STAGES 2
 
 
 // constraints:
 // sizes must be multiples of 8 (for loading from gmem to smem we dont take care of edge cases if not multiple of 8)
 
-#define GROUP_SIZE_M 8  // paramètre à tuner : 4, 8, 16
-
+template<int GROUP_SIZE_M>
 __device__ __forceinline__ void getBlockCoords(int& blockRow, int& blockCol, int numBlocksM, int numBlocksN) {
     int pid = blockIdx.x; // la grille sera 1D maintenant
 
@@ -42,8 +34,10 @@ __device__ __forceinline__ void getBlockCoords(int& blockRow, int& blockCol, int
     int firstBlockRow = groupId * GROUP_SIZE_M;
     int groupSizeM = min(numBlocksM - firstBlockRow, GROUP_SIZE_M);
 
-    blockRow = firstBlockRow + (pid % groupSizeM);
-    blockCol = (pid % numPidInGroup) / groupSizeM;
+    // The last group can contain fewer rows than GROUP_SIZE_M.
+    const int localPid = pid - groupId * numPidInGroup;
+    blockRow = firstBlockRow + (localPid % groupSizeM);
+    blockCol = localPid / groupSizeM;
 }
 
 
@@ -77,6 +71,7 @@ __device__ __forceinline__ int swizzleACol(int row, int col) {
 // load a tile from GMEM to SMEM using cp.async instructions
 // Even if doing double buffering, the As and Bs variables passed to this method should be the correct buffers for the load we want to issue. (this function is not going to determine it by itself)
 // Does not wait, only issue correct load instructions
+template <int BM, int BN, int BK>
 __device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, const __half * A, __half * Bs, const __half * B, int blockOffset, int ldaShared, int ldbShared, int blockRow, int blockCol) {
     if (blockOffset >= K) { 
         /* Nothing to load, this call was typically issued to load the next tile while computing the last tile, i.e there's no next tile*/
@@ -121,14 +116,18 @@ __device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, con
 }
 
 
-
+template<int BM, int BN, int BK, int WM, int WN, int N_STAGES, int GROUP_SIZE_M>
 __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __half* C, size_t M, size_t N, size_t K,__half alpha, __half beta) {
+    
+    constexpr int WNITER = (WN / WSUBN);
+    constexpr int WMITER = (WM / WSUBM);
+    
     extern __shared__ __align__(16) __half shmem[];
 
     int numBlocksM = M / BM;
     int numBlocksN = N / BN;
     int blockRow, blockCol;
-    getBlockCoords(blockRow, blockCol, numBlocksM, numBlocksN);
+    getBlockCoords<GROUP_SIZE_M>(blockRow, blockCol, numBlocksM, numBlocksN);
 
     /* Use lda and ldb variables to support the use of padding to avoid bank conflicts */
     int ldaShared = BK+PADDING_AS;
@@ -167,7 +166,7 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
         /* issue first copy instructions (N_STAGES-1, because one will be issued at the beginning of the following loop)*/
         #pragma unroll
         for (int selectedBuffer = 0; selectedBuffer < N_STAGES-1 ; selectedBuffer++) {
-            loadTile(tid, K, N, &As[selectedBuffer * (BM * ldaShared)], A, &Bs[selectedBuffer * (BK * ldbShared)], B, selectedBuffer*BK, ldaShared, ldbShared, blockRow, blockCol); 
+            loadTile<BM,BN,BK>(tid, K, N, &As[selectedBuffer * (BM * ldaShared)], A, &Bs[selectedBuffer * (BK * ldbShared)], B, selectedBuffer*BK, ldaShared, ldbShared, blockRow, blockCol); 
         }
         // Wait until at least one group is finished, which means (N_STAGES-2) groups or less are still pending
         cp_async_wait(N_STAGES-2);
@@ -181,7 +180,7 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
         int buf_to_load = (kTile+N_STAGES-1) % N_STAGES; // [0,N_STAGES[
 
         // issue load of next buffer into shmem
-        loadTile(tid, K, N, &As[buf_to_load * (BM* ldaShared)], A, &Bs[buf_to_load * (BK*ldbShared)], B, blockOffset + (N_STAGES-1) * BK, ldaShared, ldbShared, blockRow, blockCol);
+        loadTile<BM,BN,BK>(tid, K, N, &As[buf_to_load * (BM* ldaShared)], A, &Bs[buf_to_load * (BK*ldbShared)], B, blockOffset + (N_STAGES-1) * BK, ldaShared, ldbShared, blockRow, blockCol);
         
 
         /* ========= Starting to do some compute with Tensor Cores */
@@ -311,7 +310,8 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
 }
 
 /* Not handling edge cases, only works for multiples of BLOCKSIZE */
-float hgemm_better_reuse(const __half* A, const __half* B, __half* C, size_t M, size_t N, size_t K,__half alpha, __half beta) {
+template<int BM = 128, int BN = 128, int BK = 32, int WM = 64, int WN = 64, int N_STAGES = 2, int GROUP_SIZE_M = 4>
+float hgemm_better_reuse_wrapper(const __half* A, const __half* B, __half* C, size_t M, size_t N, size_t K,__half alpha, __half beta) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -322,12 +322,13 @@ float hgemm_better_reuse(const __half* A, const __half* B, __half* C, size_t M, 
     int threadsPerBlock = nbWarps * 32;
     dim3 nbBlocks((M/ BM) * (N / BN));
 
+
     // x N_STAGES for multi-stage buffering
     size_t shmemSizeForA = N_STAGES * (BM * (BK + PADDING_AS)) * sizeof(__half);
     size_t shmemSizeForB = N_STAGES * (BK * (BN + PADDING_BS)) * sizeof(__half);
     size_t shmemSize = shmemSizeForA + shmemSizeForB;
     cudaError_t err = cudaFuncSetAttribute(
-        hgemm_better_reuse_kernel,
+        hgemm_better_reuse_kernel<BM,BN,BK,WM,WN,N_STAGES,GROUP_SIZE_M>,
         cudaFuncAttributeMaxDynamicSharedMemorySize,
         shmemSize
     );
@@ -336,7 +337,7 @@ float hgemm_better_reuse(const __half* A, const __half* B, __half* C, size_t M, 
         fprintf(stderr, "cudaFuncSetAttribute failed: %s\n", cudaGetErrorString(err));
     }
 
-    hgemm_better_reuse_kernel<<<nbBlocks, threadsPerBlock, shmemSize>>>(A,B,C,M,N,K,alpha,beta);
+    hgemm_better_reuse_kernel<BM,BN,BK,WM,WN,N_STAGES,GROUP_SIZE_M><<<nbBlocks, threadsPerBlock, shmemSize>>>(A,B,C,M,N,K,alpha,beta);
 
     cudaEventRecord(stop);
 
@@ -348,5 +349,106 @@ float hgemm_better_reuse(const __half* A, const __half* B, __half* C, size_t M, 
     cudaEventSynchronize(stop);
     float ms; 
     cudaEventElapsedTime(&ms, start, stop);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
     return ms;
+}
+
+float hgemm_better_reuse(const __half* A, const __half* B, __half* C, size_t M, size_t N, size_t K,__half alpha, __half beta) {
+    if (M == N  && N == K  && M == 512) {
+        return hgemm_better_reuse_wrapper<64,64,64,32,32,4,8>(A,B,C,M,N,K,alpha,beta);
+    }
+    else if (M == N  && N == K  && M == 1024) {
+        return hgemm_better_reuse_wrapper<64,64,64,32,32,2,8>(A,B,C,M,N,K,alpha,beta);
+    }
+    else if (M == N  && N == K  && M == 1536) {
+        return hgemm_better_reuse_wrapper<64,128,64,32,64,2,4>(A,B,C,M,N,K,alpha,beta);
+    }
+    else if (M == N  && N == K  && M == 2048) {
+        return hgemm_better_reuse_wrapper<128,64,32,32,64,2,4>(A,B,C,M,N,K,alpha,beta);
+    }
+    else if (M == N  && N == K  && M >= 2560) {
+        return hgemm_better_reuse_wrapper<128,128,32,64,64,2,8>(A,B,C,M,N,K,alpha,beta);
+    }
+
+
+    return hgemm_better_reuse_wrapper(A,B,C,M,N,K,alpha,beta);
+}
+
+template<int... Values>
+struct IntList {};
+
+// Edit these lists to extend the search space. Every valid element of their
+// Cartesian product is instantiated when this CUDA source is compiled.
+using BmValues = IntList<64, 128>;
+using BnValues = IntList<64,128>;
+using BkValues = IntList<32, 64>;
+using WmValues = IntList<32, 64>;
+using WnValues = IntList<32,64>;
+using StageValues = IntList<2,3,4>;
+using GroupSizeValues = IntList<4, 8>;
+
+template<int BM, int BN, int BK, int WM, int WN, int N_STAGES, int GROUP_SIZE_M>
+constexpr bool is_valid_tuning_config() {
+    return BM % WM == 0 && BM % MMA_M == 0 &&
+           BN % WN == 0 && BN % MMA_N == 0 &&
+           BK % MMA_K == 0 &&
+           WM % MMA_M == 0 && WN % MMA_N == 0 &&
+           ((BM / WM) * (BN / WN) * 32) <= 1024 &&
+           N_STAGES >= 2 && N_STAGES <= 8 && GROUP_SIZE_M > 0;
+}
+
+template<int BM, int BN, int BK, int WM, int WN, int N_STAGES, int GROUP_SIZE_M>
+void add_candidate(std::vector<HgemmBetterReuseTuningCandidate>& candidates) {
+    if constexpr (is_valid_tuning_config<BM, BN, BK, WM, WN, N_STAGES, GROUP_SIZE_M>()) {
+        candidates.push_back({
+            "BM=" + std::to_string(BM) + " BN=" + std::to_string(BN) +
+                " BK=" + std::to_string(BK) + " WM=" + std::to_string(WM) +
+                " WN=" + std::to_string(WN) + " stages=" + std::to_string(N_STAGES) +
+                " group_m=" + std::to_string(GROUP_SIZE_M),
+            hgemm_better_reuse_wrapper<BM, BN, BK, WM, WN, N_STAGES, GROUP_SIZE_M>,
+            BM, BN, BK
+        });
+    }
+}
+
+template<int BM, int BN, int BK, int WM, int WN, int N_STAGES, int... GROUP_SIZE_M>
+void add_group_size_values(std::vector<HgemmBetterReuseTuningCandidate>& candidates, IntList<GROUP_SIZE_M...>) {
+    (add_candidate<BM, BN, BK, WM, WN, N_STAGES, GROUP_SIZE_M>(candidates), ...);
+}
+
+template<int BM, int BN, int BK, int WM, int WN, int... N_STAGES>
+void add_stage_values(std::vector<HgemmBetterReuseTuningCandidate>& candidates, IntList<N_STAGES...>) {
+    (add_group_size_values<BM, BN, BK, WM, WN, N_STAGES>(candidates, GroupSizeValues{}), ...);
+}
+
+template<int BM, int BN, int BK, int WM, int... WN>
+void add_wn_values(std::vector<HgemmBetterReuseTuningCandidate>& candidates, IntList<WN...>) {
+    (add_stage_values<BM, BN, BK, WM, WN>(candidates, StageValues{}), ...);
+}
+
+template<int BM, int BN, int BK, int... WM>
+void add_wm_values(std::vector<HgemmBetterReuseTuningCandidate>& candidates, IntList<WM...>) {
+    (add_wn_values<BM, BN, BK, WM>(candidates, WnValues{}), ...);
+}
+
+template<int BM, int BN, int... BK>
+void add_bk_values(std::vector<HgemmBetterReuseTuningCandidate>& candidates, IntList<BK...>) {
+    (add_wm_values<BM, BN, BK>(candidates, WmValues{}), ...);
+}
+
+template<int BM, int... BN>
+void add_bn_values(std::vector<HgemmBetterReuseTuningCandidate>& candidates, IntList<BN...>) {
+    (add_bk_values<BM, BN>(candidates, BkValues{}), ...);
+}
+
+template<int... BM>
+void add_bm_values(std::vector<HgemmBetterReuseTuningCandidate>& candidates, IntList<BM...>) {
+    (add_bn_values<BM>(candidates, BnValues{}), ...);
+}
+
+std::vector<HgemmBetterReuseTuningCandidate> hgemm_better_reuse_tuning_candidates() {
+    std::vector<HgemmBetterReuseTuningCandidate> candidates;
+    add_bm_values(candidates, BmValues{});
+    return candidates;
 }

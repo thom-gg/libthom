@@ -36,7 +36,7 @@ for kernel, values in data.items():
     gflops = [v[1] for v in values]
     plt.plot(sizes, gflops, marker='o', label=kernel)
 
-plt.xlabel("Vector Size")
+plt.xlabel("M=N=K")
 plt.ylabel("GFLOP/s")
 plt.title("Performance")
 plt.legend()

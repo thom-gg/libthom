@@ -3,5 +3,6 @@
 
 enum RunMode {
     TEST,
-    BENCH
+    BENCH,
+    TUNE
 };

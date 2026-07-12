@@ -9,7 +9,8 @@
 
 static const std::unordered_map<std::string, RunMode> runModeMap = {
     {"test", RunMode::TEST},
-    {"bench", RunMode::BENCH}
+    {"bench", RunMode::BENCH},
+    {"tune", RunMode::TUNE}
 };
 
 
@@ -17,17 +18,27 @@ static const std::unordered_map<std::string, RunMode> runModeMap = {
 using RoutineHandler = void (*)(RunMode, int, char **);
 
 static const std::unordered_map<std::string, RoutineHandler> routinesMap = {
+#ifdef LIB_HAS_ROUTINE_REDUCTION
     {"reduction", reduction_handler},
+#endif
+#ifdef LIB_HAS_ROUTINE_SDOT
     {"sdot", sdot_handler},
+#endif
+#ifdef LIB_HAS_ROUTINE_SGEMV
     {"sgemv", sgemv_handler},
+#endif
+#ifdef LIB_HAS_ROUTINE_DGEMM
     {"dgemm", dgemm_handler},
+#endif
+#ifdef LIB_HAS_ROUTINE_HGEMM
     {"hgemm", hgemm_handler}
+#endif
 };
 
 int main(int argc, char * argv[]) {
     /*
         Params:
-            ./libthom <test|bench> <ROUTINE> <implem> ...
+            ./libthom <test|bench|tune> <ROUTINE> <implem> ...
 
         Only parse routine and mode (test|bench) here then pass to routine handler
     */
