@@ -2,8 +2,8 @@
 
 #define BM 128
 #define BN 128
-#define BK 64
-#define WN 64
+#define BK 32
+#define WN 32
 #define WM 64
 
 // mma m16n8k16 f16
@@ -32,7 +32,19 @@
 // constraints:
 // sizes must be multiples of 8 (for loading from gmem to smem we dont take care of edge cases if not multiple of 8)
 
+#define GROUP_SIZE_M 8  // paramètre à tuner : 4, 8, 16
 
+__device__ __forceinline__ void getBlockCoords(int& blockRow, int& blockCol, int numBlocksM, int numBlocksN) {
+    int pid = blockIdx.x; // la grille sera 1D maintenant
+
+    int numPidInGroup = GROUP_SIZE_M * numBlocksN;
+    int groupId = pid / numPidInGroup;
+    int firstBlockRow = groupId * GROUP_SIZE_M;
+    int groupSizeM = min(numBlocksM - firstBlockRow, GROUP_SIZE_M);
+
+    blockRow = firstBlockRow + (pid % groupSizeM);
+    blockCol = (pid % numPidInGroup) / groupSizeM;
+}
 
 
 // Wrapper device function that issues a "cp.async.wait_group N" instruction. it means it will wait until N or fewer groups are pending
@@ -65,7 +77,7 @@ __device__ __forceinline__ int swizzleACol(int row, int col) {
 // load a tile from GMEM to SMEM using cp.async instructions
 // Even if doing double buffering, the As and Bs variables passed to this method should be the correct buffers for the load we want to issue. (this function is not going to determine it by itself)
 // Does not wait, only issue correct load instructions
-__device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, const __half * A, __half * Bs, const __half * B, int blockOffset, int ldaShared, int ldbShared) {
+__device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, const __half * A, __half * Bs, const __half * B, int blockOffset, int ldaShared, int ldbShared, int blockRow, int blockCol) {
     if (blockOffset >= K) { 
         /* Nothing to load, this call was typically issued to load the next tile while computing the last tile, i.e there's no next tile*/
         return;
@@ -84,7 +96,7 @@ __device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, con
 
         asm volatile ("cp.async.cg.shared.global [%0], [%1], 16;" /* 16 bytes -> 8 fp16*/
                 :: "l"(aAddr), // dst 
-                    "l"(&A[(blockIdx.x * BM + row) * K + (col + blockOffset)]) // src
+                    "l"(&A[(blockRow* BM + row) * K + (col + blockOffset)]) // src
         );
     }
 
@@ -100,7 +112,7 @@ __device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, con
 
         asm volatile ("cp.async.cg.shared.global [%0], [%1], 16;" /* 16 bytes -> 8 fp16*/
                         :: "l"(bAddr), // dst 
-                            "l"(&B[(row + blockOffset) * N + (blockIdx.y * BN + col)]) // src
+                            "l"(&B[(row + blockOffset) * N + (blockCol* BN + col)]) // src
         );
     }
 
@@ -112,6 +124,11 @@ __device__ __forceinline__ void loadTile(int tid, int K, int N, __half * As, con
 
 __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __half* C, size_t M, size_t N, size_t K,__half alpha, __half beta) {
     extern __shared__ __align__(16) __half shmem[];
+
+    int numBlocksM = M / BM;
+    int numBlocksN = N / BN;
+    int blockRow, blockCol;
+    getBlockCoords(blockRow, blockCol, numBlocksM, numBlocksN);
 
     /* Use lda and ldb variables to support the use of padding to avoid bank conflicts */
     int ldaShared = BK+PADDING_AS;
@@ -150,7 +167,7 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
         /* issue first copy instructions (N_STAGES-1, because one will be issued at the beginning of the following loop)*/
         #pragma unroll
         for (int selectedBuffer = 0; selectedBuffer < N_STAGES-1 ; selectedBuffer++) {
-            loadTile(tid, K, N, &As[selectedBuffer * (BM * ldaShared)], A, &Bs[selectedBuffer * (BK * ldbShared)], B, selectedBuffer*BK, ldaShared, ldbShared); 
+            loadTile(tid, K, N, &As[selectedBuffer * (BM * ldaShared)], A, &Bs[selectedBuffer * (BK * ldbShared)], B, selectedBuffer*BK, ldaShared, ldbShared, blockRow, blockCol); 
         }
         // Wait until at least one group is finished, which means (N_STAGES-2) groups or less are still pending
         cp_async_wait(N_STAGES-2);
@@ -164,14 +181,14 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
         int buf_to_load = (kTile+N_STAGES-1) % N_STAGES; // [0,N_STAGES[
 
         // issue load of next buffer into shmem
-        loadTile(tid, K, N, &As[buf_to_load * (BM* ldaShared)], A, &Bs[buf_to_load * (BK*ldbShared)], B, blockOffset + (N_STAGES-1) * BK, ldaShared, ldbShared);
+        loadTile(tid, K, N, &As[buf_to_load * (BM* ldaShared)], A, &Bs[buf_to_load * (BK*ldbShared)], B, blockOffset + (N_STAGES-1) * BK, ldaShared, ldbShared, blockRow, blockCol);
         
 
         /* ========= Starting to do some compute with Tensor Cores */
         for (int dotIdx = 0; dotIdx < BK; dotIdx+=MMA_K) {
 
 
-            /* Load all A fragments */
+            #pragma unroll /* Load all A fragments */
             for (int warpSubTileRow = 0; warpSubTileRow<WMITER; warpSubTileRow++) {
                 int rowLocal = laneId % 16;
                 int colLocal= (laneId / 16) * 8;
@@ -187,7 +204,7 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
                 );
             }
 
-            /* Load all B fragments */
+            #pragma unroll /* Load all B fragments */
             for (int warpSubTileCol = 0; warpSubTileCol<WNITER; warpSubTileCol++) {
                  int row = laneId % 16; // K local : 0..15, couvre les 2 tuiles 8x8 empilées
                 int logicalCol = warpCol * WN + warpSubTileCol * WSUBN; // base N (8 colonnes), pas de +col car x2 = pas de split colonne
@@ -238,7 +255,7 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
 
                 // }
             }
-
+            #pragma unroll
             for (int warpSubTileRow = 0; warpSubTileRow<WMITER; warpSubTileRow++) {
                 for (int warpSubTileCol = 0; warpSubTileCol<WNITER; warpSubTileCol++) {
                     // perform MMA
@@ -268,8 +285,8 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
                 // c0 and c1
                 int row = groupID;
                 int col = (threadID_in_group * 2) + (0 & 0x1); // c0
-                int globalMemRow = blockIdx.x * BM + warpRow * WM + warpSubTileRow * WSUBM + row;
-                int globalMemCol = blockIdx.y * BN + warpCol * WN + warpSubTileCol * WSUBN + col;
+                int globalMemRow = blockRow * BM + warpRow * WM + warpSubTileRow * WSUBM + row;
+                int globalMemCol = blockCol* BN + warpCol * WN + warpSubTileCol * WSUBN + col;
                 __half2 h0 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]);
                 h0 = __hadd2(__hmul2(alpha2, h0), __hmul2(beta2, *reinterpret_cast<__half2*>(&C[globalMemRow * N + globalMemCol])));
                 // writing back 2 fp16 at a time
@@ -279,8 +296,8 @@ __global__ void hgemm_better_reuse_kernel(const __half* A, const __half* B, __ha
                 // c2 and c3
                 int row = groupID + 8;
                 int col = (threadID_in_group * 2) + (2 & 0x1); // c2
-                int globalMemRow = blockIdx.x * BM + warpRow * WM + warpSubTileRow * WSUBM + row;
-                int globalMemCol = blockIdx.y * BN + warpCol * WN + warpSubTileCol * WSUBN + col;
+                int globalMemRow = blockRow * BM + warpRow * WM + warpSubTileRow * WSUBM + row;
+                int globalMemCol = blockCol * BN + warpCol * WN + warpSubTileCol * WSUBN + col;
                 __half2 h1 = *reinterpret_cast<__half2*>(&regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1]);
                 h1 = __hadd2(__hmul2(alpha2, h1), __hmul2(beta2, *reinterpret_cast<__half2*>(&C[globalMemRow * N + globalMemCol+0])));
                 // writing back 2 fp16 at a time
@@ -303,7 +320,7 @@ float hgemm_better_reuse(const __half* A, const __half* B, __half* C, size_t M, 
 
     int nbWarps = (BM / WM) * (BN / WN);
     int threadsPerBlock = nbWarps * 32;
-    dim3 nbBlocks((M/ BM), (N / BN));
+    dim3 nbBlocks((M/ BM) * (N / BN));
 
     // x N_STAGES for multi-stage buffering
     size_t shmemSizeForA = N_STAGES * (BM * (BK + PADDING_AS)) * sizeof(__half);
