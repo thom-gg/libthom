@@ -1,68 +1,61 @@
-- .cu files must not have - in them, use underscores
+# libthom
 
-Build:
-```
-cmake -B build -DARCH=80
+`libthom` is a collection of CUDA implementations for common linear algebra operations. It includes hand-written kernels and reference implementations such as cuBLAS and Thrust, with command-line tools to check results and compare performance.
+
+![libthom performance plots: SGEMV on A100, SDOT and Reduction on RTX 2060](README-banner.png)
+
+## Routines
+
+| Routine | Description | Details |
+| --- | --- | --- |
+| `reduction` | Sum a vector with custom CUDA and Thrust implementations. | [Routine notes and benchmark](routines/reduction/README.md) |
+| `sdot` | Single-precision dot product. | [Routine notes](routines/sdot/README.md) |
+| `sgemv` | Single-precision general matrix-vector multiplication. | [Routine notes](routines/sgemv/README.md) |
+| `dgemm` | Double-precision general matrix multiplication. | [Source and implementations](routines/dgemm/) |
+| `hgemm` | Half-precision general matrix multiplication. | [Source and implementations](routines/hgemm/) |
+
+The plots above show selected benchmark results: SGEMV on an NVIDIA A100, and SDOT and Reduction on an NVIDIA RTX 2060. Performance depends on the GPU, CUDA toolkit, and selected implementation.
+
+## Requirements
+
+- NVIDIA GPU and a compatible NVIDIA driver
+- CUDA Toolkit with `nvcc`, cuBLAS, and cuRAND
+- CMake 3.28 or newer
+- A C++ compiler supported by the installed CUDA Toolkit
+
+The build compiles for all CUDA architectures by default. To target a specific compute capability, set `ARCH` (for example, `80` for A100). Choose an architecture supported by your GPU and CUDA Toolkit.
+
+## Build
+
+Build all routines:
+
+```sh
+cmake -S . -B build -DARCH=80
 cmake --build build
 ```
 
-Compile only one routine:
-```
-cmake -B build -DARCH=80 -DROUTINE=dgemm
+Build a single routine:
+
+```sh
+cmake -S . -B build -DARCH=80 -DROUTINE=sgemv
 cmake --build build
 ```
 
-Available routines are `reduction`, `sdot`, `sgemv`, `dgemm`, and `hgemm`.
-Use `-DROUTINE=all` or omit `ROUTINE` to compile everything.
+Available `ROUTINE` values are `reduction`, `sdot`, `sgemv`, `dgemm`, and `hgemm`. Use `-DROUTINE=all` (the default) to build them all.
 
-nvbench requires
-CMake > 3.30.4
+## Run
 
+The executable is `build/libthom`. Each routine has its own implementations and arguments. The general command format is:
 
-Build on modal:
+```sh
+./build/libthom <test|bench> <routine> <implementation> [arguments...]
+```
 
-wget https://github.com/Kitware/CMake/releases/download/v3.28.6/cmake-3.28.6-linux-x86_64.tar.gz ;
-tar -xzf cmake-3.28.6-linux-x86_64.tar.gz ;
-mv cmake-3.28.6-linux-x86_64 /opt/cmake ;
-export PATH=/opt/cmake/bin:$PATH ;
-export CUDA_HOME=/usr/local/cuda
-export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
-export CPATH=$CUDA_HOME/include:$CPATH
+For example, list the implementation names in the selected routine's source, then run a correctness check or a benchmark:
 
-cmake -S . -B build -DARCH=80 -DROUTINE=hgemm
-cmake --build build
+```sh
+./build/libthom test reduction warp 1000000 10
+./build/libthom bench reduction warp
+```
 
-
-Pour zip son code
-
-tar -cvf routines.tar CMakeLists.txt main.cpp enums.h routines cmake/
-
-# Pour modifier l'image docker
-docker build -t dockerthomdocker/cuda-with-cmake:latest .
-docker push dockerthomdocker/cuda-with-cmake
-
-# Une fois sur la VM
-On host:
-scp routines.tar <host>:~
-
-On neocloud instance: 
-- tar -xvf routines.tar
-- then docker run --gpus all -it --rm -v $(pwd):/workspace  dockerthomdocker/cuda-with-cmake:latest
-
-
-run_traces() {
-  sudo ncu --set full --export report_$2_$1.ncu-rep ./build/libthom test hgemm $2 $1 $1 $1 2 0
-}
-ncu --set full --export report_cublas_$1.ncu-rep ./build/libthom test hgemm final $1 $1 $1 2 0
-
-
-
-sudo nano /etc/modprobe.d/nvidia.conf
-echo "options nvidia NVreg_RestrictProfilingToAdminUsers=0"  >> /etc/modprobe.d/nvidia.conf
-
-
-
-
-# Cette commande en dessous etati necessaire sinon le reboot suffisait pas
-sudo update-initramfs -u ; sudo reboot
+Exact argument counts vary by routine. The `test` mode accepts a size, iteration count, and optional result-check flag; `bench` runs the routine's configured set of sizes. Some implementations are only compiled for certain GPU architectures. See the routine source and notes for implementation-specific details.
