@@ -1,7 +1,9 @@
 #include "sgemv.h"
 
 
-// 1 thread per row of A (coalesced accesseses to both A and x)
+// We assign a warp to 4 rows of the A matrix
+// this allows us to do vectorized reads since the matrix is column major
+// We can then do a quick reduction using only warp level intrinsics since all values in a row are taken care of by a single warp
 __global__ void col3_vecto_kernel(int M, int N, const float * alpha, const float * A, int lda, const float * x, int incx, const float * beta, float * y, int incy) {
     int tid = threadIdx.x;
     int globalIdx = tid + blockIdx.x * blockDim.x;
@@ -75,7 +77,6 @@ float sgemv_col3_vecto(int m, int n, const float * alpha, const float * A, int l
     cudaEventRecord(start);
 
     // each warp takes care of 4 rows 
-
     int warpsPerBlock = 8;
     int threadsPerBlock = warpsPerBlock * 32;
     int totalNbWarps = ( (m + 4 - 1) / 4);
