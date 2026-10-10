@@ -1,0 +1,2 @@
+# HGEMM
+This one is still a Work In Progress 🚧⚠️ there's nothing really finished or polished here, I just experimented with a lower-precision datatype (16 bit __half), that you cannot handle like regular datatypes, you have to use instrinsics such as __hadd2, __hmul2 etc

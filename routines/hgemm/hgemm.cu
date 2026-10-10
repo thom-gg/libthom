@@ -55,17 +55,8 @@ namespace hgemm {
     #if LIB_HAS(HGEMM_FINAL)
         {"final", hgemm_final},
     #endif
-      #if LIB_HAS(HGEMM_BRUCE)
-        {"bruce", hgemm_bruce},
-    #endif
-    #if LIB_HAS(HGEMM_BRUCE2)
-        {"bruce2", hgemm_bruce2},
-    #endif
      #if LIB_HAS(HGEMM_BETTER_REUSE)
         {"better_reuse", hgemm_better_reuse},
-    #endif
-     #if LIB_HAS(HGEMM_GROK)
-        {"grok", hgemm_grok},
     #endif
     };
  

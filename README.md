@@ -45,7 +45,6 @@ cmake -S . -B build -DARCH=80 -DROUTINE=sgemv
 cmake --build build
 ```
 
-Available `ROUTINE` values are `reduction`, `sdot`, `sgemv`, `dgemm`, and `hgemm`. Use `-DROUTINE=all` (the default) to build them all.
 
 ## Run
 
