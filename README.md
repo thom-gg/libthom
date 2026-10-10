@@ -1,6 +1,6 @@
 # libthom
 
-`libthom` is a collection of CUDA implementations for common linear algebra operations. It includes hand-written kernels and reference implementations such as cuBLAS and Thrust, with command-line tools to check results and compare performance.
+`libthom` is a collection of CUDA implementations for common linear algebra operations. I made this repository to bring my work on different routines together and keep track of the performance evolution through successive iterations. In that sense it is an experimental project, **not a production library**. However it allows me to explore the tooling needed to target different GPU microarchitectures from one codebase, and manage that at compile time. It includes reference implementations such as cuBLAS and Thrust, with command-line tools to check results and compare performance.
 
 ![libthom performance plots: SGEMV on A100, SDOT and Reduction on RTX 2060](README-banner.png)
 
@@ -8,13 +8,17 @@
 
 | Routine | Description | Details |
 | --- | --- | --- |
-| `reduction` | Sum a vector with custom CUDA and Thrust implementations. | [Routine notes and benchmark](routines/reduction/README.md) |
-| `sdot` | Single-precision dot product. | [Routine notes](routines/sdot/README.md) |
-| `sgemv` | Single-precision general matrix-vector multiplication. | [Routine notes](routines/sgemv/README.md) |
-| `dgemm` | Double-precision general matrix multiplication. | [Source and implementations](routines/dgemm/) |
-| `hgemm` | Half-precision general matrix multiplication. | [Source and implementations](routines/hgemm/) |
+| `reduction` | Sum a vector. | [Source and notes](routines/reduction/) |
+| `sdot` | Single-precision dot product. | [Source and notes](routines/sdot/) |
+| `sgemv` | Single-precision general matrix-vector multiplication. | [Source and notes](routines/sgemv/) |
+| `dgemm` | Double-precision general matrix multiplication. | [Source and notes](routines/dgemm/) |
+| `hgemm` | Half-precision general matrix multiplication. | [Source and notes](routines/hgemm/) |
 
-The plots above show selected benchmark results: SGEMV on an NVIDIA A100, and SDOT and Reduction on an NVIDIA RTX 2060. Performance depends on the GPU, CUDA toolkit, and selected implementation.
+The plots above show selected benchmark results: SGEMV on an NVIDIA A100, and SDOT and Reduction on an NVIDIA RTX 2060. These are the two main GPUs i've been working with (locally on a 2060, and using an A100 from a cloud when needed)
+
+## Future work
+
+In addition to any new routine I might work on, I want to make this project multi-platform, probably first by adding Metal kernels, and maybe later targeting AMD GPUs.
 
 ## Requirements
 
