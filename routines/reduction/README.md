@@ -1,9 +1,9 @@
 # Reduction routine
 
 ### Implementations:
-- warp: just some playing around with reductions, implemented an example with the addition operator using 2 kernels, the first one computes result block wide, by doing a warp level reduction with the __shfl_down_sync instruction and then a block level reduction using shared memory. Each block writes its result in global memory. The second kernel then launch a single block that reduces the results from each blocks, using the same warp-level then block-level approach.
+- __**warp**__: just some playing around with reductions, implemented an example with the addition operator using 2 kernels, the first one computes result block wide, by doing a warp level reduction with the __shfl_down_sync instruction and then a block level reduction using shared memory. Each block writes its result in global memory. The second kernel then launch a single block that reduces the results from each blocks, using the same warp-level then block-level approach.
 
-- thrust reference implementation from NVIDIA CCCL's Thrust library.
+- __**thrust**__: reference implementation from NVIDIA CCCL's Thrust library.
 
 ### Benchmark:
 
