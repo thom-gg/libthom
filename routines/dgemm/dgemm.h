@@ -4,9 +4,6 @@
 
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
 
-#if LIB_HAS(DGEMM_CUBLAS)
-float dgemm_cublas(const double* A, const double* B, double* C, size_t M, size_t N, size_t K,double alpha, double beta);
-#endif
 
 #if LIB_HAS(DGEMM_BLOCKTILING)
 float dgemm_blocktiling(const double* A, const double* B, double* C, size_t M, size_t N, size_t K,double alpha, double beta);

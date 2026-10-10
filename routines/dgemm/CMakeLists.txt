@@ -1,6 +1,5 @@
 set(SELECTED_DGEMM_CUDA_FILES)
 
-add_arch_cuda_source(libroutines SELECTED_DGEMM_CUDA_FILES dgemm_cublas all)
 add_arch_cuda_source(libroutines SELECTED_DGEMM_CUDA_FILES dgemm_blocktiling all)
 add_arch_cuda_source(libroutines SELECTED_DGEMM_CUDA_FILES dgemm_cpasync 80)
 add_arch_cuda_source(libroutines SELECTED_DGEMM_CUDA_FILES dgemm_cublas_tc all)

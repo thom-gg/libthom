@@ -38,9 +38,6 @@ namespace dgemm {
     
     /* Registering implementations, only if they're compiled. They are compiled if we are using the correct Compute Capability*/
     static const std::unordered_map<std::string, DgemmImpl> dgemmImpls = {
-    #if LIB_HAS(DGEMM_CUBLAS)
-        {"cublas", dgemm_cublas},
-    #endif
     #if LIB_HAS(DGEMM_BLOCKTILING)
         {"blocktiling", dgemm_blocktiling},
     #endif
