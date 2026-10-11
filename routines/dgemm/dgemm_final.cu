@@ -1,7 +1,6 @@
 #include "dgemm.h"
 
-/* Load BMxBK and BKxBN tiles into shmem than compute partial results and sum them together */
-/* Assuming BM=BK=BN */
+/* Load BMxBK and BKxBN tiles into smem than compute partial results and sum them together */
 
 #define BM 64
 #define BN 128
@@ -21,18 +20,20 @@
 #define B_FRAGMENT_VALUES 1
 #define C_FRAGMENT_VALUES 2
 
-// resolvign bank conflicts
+// Using padding to remove bank conflicts
 #define PADDING_AS 4
 #define PADDING_BS 8
 
 
-// load a tile from GMEM to SHMEM using cp.async instructions
-// As and Bs should already be the correct ones of the two buffers we have in memory
-// does not wait, only issue correct load instruction
+/* Load a tile from GMEM to SMEM using cp.async instructions
+If we are doing multi-stage pipelining and have multiple buffers for As and Bs, the 
+As and Bs parameters passed to this function should already be the correct buffers.
+This function does not wait, only issues correct load instruction */
 __device__ void loadTile(int tid, int K, int N, double * As, const double * A, double * Bs, const double * B, int blockOffset, int ldaShared, int ldbShared) {
     if (blockOffset >= K) {  // nothing to load (this call was issued for double buffering and we are at the end of the K dimension)
         return;
     }
+    // As
     for (int loadIndex = tid*2 ; loadIndex < (BM * BK) ; loadIndex += blockDim.x*2) {
         int row = loadIndex / BK;
         int col = loadIndex % BK;
@@ -77,13 +78,8 @@ __global__ void dgemm_final_kernel(const double* A, const double* B, double* C, 
     int warpCol = warpIdx % (BN/WN);
     
 
-    // dimension of the warp subtiles
-    // int WSUBN = WN / WNITER;
-    // int WSUBM = WM / WMITER;
 
-
-
-    // mma fragments coords
+    // Values used to compute mma fragments coords
     int laneId = tid % 32;
     int groupID = laneId >> 2;
     int threadID_in_group = laneId % 4;
@@ -95,31 +91,27 @@ __global__ void dgemm_final_kernel(const double* A, const double* B, double* C, 
     // as many C fragments as mma instructions performed by each warp (and therefore each thread)
     double regCFragment[WMITER*WNITER][C_FRAGMENT_VALUES] = {0.0};
 
-    // load  very first tile 
+    //  Before entering the loop, load the very first tile
     {
         int selectedBuffer = 0;
         loadTile(tid, K, N, &As[selectedBuffer * (BM * ldaShared)], A, &Bs[selectedBuffer * (BK * ldbShared)], B, 0, ldaShared, ldbShared); 
         asm volatile("cp.async.wait_group 0 ;");
         __syncthreads();
     }
-    
+
+    // ============= COMPUTE LOOP
     for (int blockOffset = 0; blockOffset<K; blockOffset += BK) {
         int kTile = blockOffset/BK;
         int current_buf = kTile % 2; // 0 or 1
         int next_buf = (kTile+1) %2; // 0 or 1
 
-        // load next buffer into shmem
+        // Start the asynchronous load of the next buffer into SMEM
         loadTile(tid, K, N, &As[next_buf * (BM* ldaShared)], A, &Bs[next_buf * (BK*ldbShared)], B, blockOffset + BK, ldaShared, ldbShared);
-        // wait for current buffer (literally wait until only 1 group is pending (i.e wait until only next buffer is pending))
         
 
-
-
-        // compute current buffer
-        // ======== OK NOW WE DO SOME COMPUTE 
-        // with tensor cores.
+        // compute on current buffer using tensor cores
         for (int dotIdx = 0; dotIdx < BK; dotIdx+=4) {
-            // load a values into register
+            // load A values into register
             for (int warpSubTileRow = 0; warpSubTileRow<WMITER; warpSubTileRow++) {
                 // load this A fragment
                 {
@@ -138,7 +130,7 @@ __global__ void dgemm_final_kernel(const double* A, const double* B, double* C, 
                         regBFragment[0] = Bs[(current_buf * (BK*ldbShared)) + (dotIdx + row) * ldbShared + (warpCol * WN + warpSubTileCol * WSUBN + col)];
 
                     }
-                    // have WMITER*WNITER C fragments that are reused always
+                    // We have WMITER*WNITER C fragments that are reused always
                     // perform MMA
                     asm volatile("mma.sync.aligned.m8n8k4.row.col.f64.f64.f64.f64 {%0, %1}, {%2}, {%3}, {%4, %5};"
                                 : "=d"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0]), "=d"(regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1])
@@ -161,7 +153,7 @@ __global__ void dgemm_final_kernel(const double* A, const double* B, double* C, 
     for (int warpSubTileRow = 0; warpSubTileRow<WMITER; warpSubTileRow++) {
         for (int warpSubTileCol = 0; warpSubTileCol<WNITER; warpSubTileCol++) {
             {
-                // write the two values with a vectorized write
+                // write the two values with a single vectorized write
                 // coords of c0, c1 is just c0 + 1
                 int row = groupID;
                 int col = (threadID_in_group * 2) + (0); // formula from PTX docs idk
@@ -172,26 +164,7 @@ __global__ void dgemm_final_kernel(const double* A, const double* B, double* C, 
                     alpha *  regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1] + beta * C[globalMemRow * N + globalMemCol+1] //c1
                 );
                 *reinterpret_cast<double2 *>(&C[globalMemRow * N + globalMemCol]) = c0c1vals;
-            }
-            // {
-            //     // c0
-            //     int row = groupID;
-            //     int col = (threadID_in_group * 2) + (0); // formula from PTX docs idk
-            //     int globalMemRow = blockIdx.x * BM + warpRow * WM + warpSubTileRow * WSUBM + row;
-            //     int globalMemCol = blockIdx.y * BN + warpCol * WN + warpSubTileCol * WSUBN + col;
-            //     C[globalMemRow * N + globalMemCol] = alpha *  regCFragment[warpSubTileRow*WNITER + warpSubTileCol][0] + beta * C[globalMemRow * N + globalMemCol];
-
-            // }
-            // {
-            //     // c1
-            //     int row = groupID;
-            //     int col = (threadID_in_group * 2) + (1); // formula from PTX docs idk
-            //     int globalMemRow = blockIdx.x * BM + warpRow * WM + warpSubTileRow * WSUBM + row;
-            //     int globalMemCol = blockIdx.y * BN + warpCol * WN + warpSubTileCol * WSUBN + col;
-            //     C[globalMemRow * N + globalMemCol] = alpha *  regCFragment[warpSubTileRow*WNITER + warpSubTileCol][1] + beta * C[globalMemRow * N + globalMemCol];
-
-            // }
-           
+            }      
         }
     }
 
@@ -199,7 +172,6 @@ __global__ void dgemm_final_kernel(const double* A, const double* B, double* C, 
 
 }
 
-/* Not handling edge cases, only works for multiples of BLOCKSIZE */
 float dgemm_final(const double* A, const double* B, double* C, size_t M, size_t N, size_t K,double alpha, double beta) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
