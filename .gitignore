@@ -3,3 +3,4 @@ build
 *.nsys-rep
 bench_*.csv
 plot.png
+__pycache__/

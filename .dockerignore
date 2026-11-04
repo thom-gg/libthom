@@ -1,0 +1,7 @@
+build/
+.git/
+.claude/
+*.csv
+*.nsys-rep
+*.ncu-rep
+plot.png

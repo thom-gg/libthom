@@ -1,52 +1,30 @@
-FROM nvidia/cuda:13.3.0-devel-ubuntu26.04
+# Tools to build and run libthom, without the sources: they are mounted in the container (locally, or on Modal
+# with tools/modal_shell.py) and compiled inside it. CUDA toolkit, CMake and Python with matplotlib.
+# The nvidia/cuda images exist for linux/amd64 and linux/arm64: the image builds natively on Apple Silicon
+# (nvcc doesn't need a GPU to compile), and Modal builds it for linux/amd64.
+# The driver of the GPU machine must support the CUDA version (nvidia-smi shows the max one).
+ARG CUDA_VERSION=13.3.0
+ARG UBUNTU_VERSION=26.04
+
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG CMAKE_VERSION=3.28.6
 
-
-# Install SSH server and dependencies
-RUN apt-get update && \
-apt-get install -y openssh-server && \
-apt-get clean && \
-rm -rf /var/lib/apt/lists/*
-
-# Configure SSH
-RUN mkdir -p /var/run/sshd && \
-sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && \
-sed -i 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' /etc/pam.d/sshd && \
-ssh-keygen -A
-
-# Create SSH directory for root
-RUN mkdir -p /root/.ssh && \
-chmod 700 /root/.ssh
-
-# Install CMake
+# CMake from apt instead of the Kitware x86_64 tarball, so that it works on both architectures.
+# matplotlib from apt too (for tools/plot.py), pip refuses to install into the system Python of recent Ubuntus
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        gnupg \
-        
-        software-properties-common \
-    && add-apt-repository -y ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
         build-essential \
-        git \
+        cmake \
         ninja-build \
-        python3.11 \
-        python3.11-dev \
-        python3.11-venv \
-    && curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
-        | tar -xz --strip-components=1 -C /usr/local \
-    && curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py \
-    && python3.11 /tmp/get-pip.py \
-    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
-    && rm -rf /var/lib/apt/lists/* /tmp/get-pip.py
+        git \
+        python3 \
+        python3-matplotlib \
+    && rm -rf /var/lib/apt/lists/*
 
-
-ENV CPATH=/usr/local/cuda-13.3/include:$CPATH
+# The routines' .cpp files include CUDA headers but are compiled by the host compiler, not nvcc
+ENV CPATH=/usr/local/cuda/include
 WORKDIR /workspace
 
 CMD ["/bin/bash"]
+

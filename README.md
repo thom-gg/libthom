@@ -13,6 +13,7 @@
 | `sgemv` | Single-precision general matrix-vector multiplication. | [Source and notes](routines/sgemv/) |
 | `dgemm` | Double-precision general matrix multiplication. | [Source and notes](routines/dgemm/) |
 | `hgemm` | Half-precision general matrix multiplication. | [Source and notes](routines/hgemm/) |
+| `w4a16` | GEMM with fp16 activations and int4 quantized weights (dequantized on the fly). | [Source and notes](routines/w4a16/) |
 
 The plots above show selected benchmark results: SGEMV on an NVIDIA A100, and SDOT and Reduction on an NVIDIA RTX 2060. These are the two main GPUs i've been working with (locally on a 2060, and using an A100 from a cloud when needed)
 
@@ -45,6 +46,44 @@ cmake -S . -B build -DARCH=80 -DROUTINE=sgemv
 cmake --build build
 ```
 
+
+## Docker
+
+The [Dockerfile](Dockerfile) provides the tools, not the sources: CUDA toolkit, CMake and Python with matplotlib (for [plot.py](tools/plot.py)). The code is mounted in the container and compiled inside it. nvcc doesn't need a GPU, so it can compile the project on any machine, e.g. a MacBook.
+
+### Compiling locally while editing
+
+Build the image once (native architecture, e.g. arm64 on Apple Silicon):
+
+```sh
+docker build -t libthom:toolchain .
+```
+
+Then start a throwaway interactive container with the repository mounted in `/workspace`.
+
+```sh
+docker run --rm -it -v "$PWD":/workspace libthom:toolchain
+```
+
+Inside the container, compile as usual. The `build/` directory lives in the mounted repository, so it survives the container and the next builds are incremental:
+
+```sh
+cmake -S . -B build -G Ninja -DARCH=80
+cmake --build build
+```
+
+### On a Modal GPU
+
+[tools/modal_shell.py](tools/modal_shell.py) opens an interactive shell on a Modal A100. Modal builds the image from the Dockerfile itself (no registry needed) and caches it. The repository is copied in `/workspace` as editable files, so you can compile and make small changes as in the local container:
+
+```sh
+modal shell tools/modal_shell.py
+```
+
+```sh
+cmake -S . -B build -G Ninja -DARCH=80
+cmake --build build
+```
 
 ## Run
 
