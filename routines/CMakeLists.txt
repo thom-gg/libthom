@@ -1,7 +1,7 @@
 set(ARCH "all" CACHE STRING "CUDA compute capability to compile, for example 75, 86, 89, or all")
-set(ROUTINE "all" CACHE STRING "Routine to compile, for example dgemm, hgemm, reduction, sdot, sgemv, or all")
+set(ROUTINE "all" CACHE STRING "Routine to compile, for example dgemm, hgemm, reduction, sdot, sgemv, w4a16, or all")
 
-set(LIBTHOM_ROUTINES reduction sdot sgemv dgemm hgemm)
+set(LIBTHOM_ROUTINES reduction sdot sgemv dgemm hgemm w4a16)
 
 if(NOT ROUTINE STREQUAL "all" AND NOT ROUTINE IN_LIST LIBTHOM_ROUTINES)
     message(FATAL_ERROR "Unknown ROUTINE=${ROUTINE}. Expected one of: all, ${LIBTHOM_ROUTINES}")
@@ -45,6 +45,11 @@ endif()
 libthom_routine_enabled(hgemm hgemm_enabled)
 if(hgemm_enabled)
     list(APPEND LIBTHOM_ROUTINE_SOURCES hgemm/hgemm.cu)
+endif()
+
+libthom_routine_enabled(w4a16 w4a16_enabled)
+if(w4a16_enabled)
+    list(APPEND LIBTHOM_ROUTINE_SOURCES w4a16/w4a16.cpp w4a16/quantize.cpp)
 endif()
 
 add_library(libroutines STATIC

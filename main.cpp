@@ -31,7 +31,10 @@ static const std::unordered_map<std::string, RoutineHandler> routinesMap = {
     {"dgemm", dgemm_handler},
 #endif
 #ifdef LIB_HAS_ROUTINE_HGEMM
-    {"hgemm", hgemm_handler}
+    {"hgemm", hgemm_handler},
+#endif
+#ifdef LIB_HAS_ROUTINE_W4A16
+    {"w4a16", w4a16_handler},
 #endif
 };
 

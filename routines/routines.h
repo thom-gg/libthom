@@ -35,6 +35,10 @@ namespace hgemm {
     extern cublasHandle_t cublasHandle;
 }
 
+namespace w4a16 {
+    extern cublasHandle_t cublasHandle;
+}
+
 
 
 #define CUDA_CHECK(error)                                                     \
@@ -69,9 +73,12 @@ void sdot_handler(RunMode runMode, int argc, char * argv[]);
 void sgemv_handler(RunMode runMode, int argc, char * argv[]);
 void dgemm_handler(RunMode runMode, int argc, char * argv[]);
 void hgemm_handler(RunMode runMode, int argc, char * argv[]);
+void w4a16_handler(RunMode runMode, int argc, char * argv[]);
 
 /* Common helpers */
 float getRdmFloat(float lowerBound, float upperBound);
+void flushL2();
+float getPeakBandwidthGBs();
 
 
 /* Implementation will either be ReductionImpl, SdotImpl, etc...
