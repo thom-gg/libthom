@@ -58,3 +58,7 @@ float w4a16_cublas(const W4A16Problem& problem);
 #if LIB_HAS(W4A16_NAIVE)
 float w4a16_naive(const W4A16Problem& problem);
 #endif
+
+#if LIB_HAS(W4A16_PIPELINING)
+float w4a16_pipelining(const W4A16Problem& problem);
+#endif

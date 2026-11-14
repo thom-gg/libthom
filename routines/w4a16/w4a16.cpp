@@ -69,6 +69,9 @@ namespace w4a16 {
     #if LIB_HAS(W4A16_NAIVE)
         {"naive", {w4a16_naive, WeightFormat::INT4}},
     #endif
+    #if LIB_HAS(W4A16_PIPELINING)
+        {"pipelining", {w4a16_pipelining, WeightFormat::INT4}},
+    #endif
     };
 
 

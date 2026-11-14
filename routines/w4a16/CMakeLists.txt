@@ -2,6 +2,7 @@ set(SELECTED_W4A16_CUDA_FILES)
 
 add_arch_cuda_source(libroutines SELECTED_W4A16_CUDA_FILES w4a16_cublas all)
 add_arch_cuda_source(libroutines SELECTED_W4A16_CUDA_FILES w4a16_naive all)
+add_arch_cuda_source(libroutines SELECTED_W4A16_CUDA_FILES w4a16_pipelining all)
 
 
 if(NOT SELECTED_W4A16_CUDA_FILES)
