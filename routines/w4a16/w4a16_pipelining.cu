@@ -33,6 +33,13 @@ __device__ __forceinline__ void dequant_int4x8(uint32_t packed, float scale, flo
 #define PIPELINE_STAGES 3
 
 
+#define A_FRAGMENT_VALS 4
+#define B_FRAGMENT_VALS 2
+#define C_FRAGMENT_VALS 4
+
+#define N_TILES_PER_WARP 4 // m16n8k16 so 8 cols of N dimension per mma instruction;  32 cols total => 4 n tiles 
+
+
 #define MAX_M_VALUE 16 // we only care about small M size for this kernel, if we had bigger M size we would just dispatch to another kernel
 
 
@@ -115,6 +122,16 @@ __global__ void w4a16_pipelining_kernel(const __half * A, const uint32_t * W_int
   __shared__ __align__(16) uint32_t W_smem[PIPELINE_STAGES][BN * (BK / 8)];
   __shared__ __align__(16) __half scales_smem[PIPELINE_STAGES][BN * (BK / GROUP_SIZE)];
 
+  // using mma shape m16n8k16
+  // Fragment A: 4 registres half2
+  // Fragment B: 2 registres half2
+  // Fragment C: 4 registres fp32
+  // storing __half2 as uint32_t  
+  uint32_t fragmentA[A_FRAGMENT_VALS];
+  uint32_t fragmentB[B_FRAGMENT_VALS];
+  float fragmentC[N_TILES_PER_WARP][C_FRAGMENT_VALS] = {};
+
+
   /* Prologue: start the PIPELINE_STAGES-1 first copies */
   for (int currentK = 0; (currentK / BK) < PIPELINE_STAGES-1; currentK += BK) {
     int tileNumber = currentK / BK;
@@ -129,9 +146,33 @@ __global__ void w4a16_pipelining_kernel(const __half * A, const uint32_t * W_int
     int tileNumber = currentK / BK;
     int tileNumberToCopy = tileNumber + PIPELINE_STAGES - 1;
     int stageIndex = tileNumberToCopy % PIPELINE_STAGES;
+    int computeStage = tileNumber % PIPELINE_STAGES;
     load_tile(tileNumberToCopy * BK, blockStartingCol, A, A_smem[stageIndex], W_int4_packed, W_smem[stageIndex], scales, scales_smem[stageIndex], M, N, K);
 
     /* Work on that available tile (compute with TC)*/
+
+    // the m16n8k16 mma shape has a step size of 16 over the BK tile
+    #pragma unroll
+    for (int k0 = 0; k0<BK; k0 += 16) {
+
+      // load A fragment
+      const int rowLocal = warpLane % 16;
+      const int colLocal = k0 + (warpLane / 16) * 8;
+      size_t ptr64bit = __cvta_generic_to_shared(&A_smem[computeStage][rowLocal * BK + colLocal]);
+      uint32_t ptr = static_cast<uint32_t>(ptr64bit);
+      asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];"
+          : "=r"(fragmentA[0]), "=r"(fragmentA[1]), "=r"(fragmentA[2]), "=r"(fragmentA[3])
+          : "r"(ptr)
+      );
+      // the m16n8k16 uses the whole warp to compute 8 columns on the N dimension, while a warp has to take care of 32 columns, so we need to do
+      // multiple MMA
+      #pragma unroll
+      for (int nTile = 0; nTile < N_TILES_PER_WARP; nTile += 1) {
+        // load W fragment (without ldmatrix)
+        
+        // compute
+      }
+    }
 
   }
     
